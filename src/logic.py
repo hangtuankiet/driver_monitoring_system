@@ -49,6 +49,11 @@ class DriverMonitor:
         self.eye_closed_time = 0
         self.start_time = None
         self.sound_enabled = self.config['sound_enabled']
+        # Thêm biến để theo dõi thời gian và kích thước ngáp
+        self.yawn_start_time = None
+        self.yawn_duration = 0
+        self.yawn_threshold = 2.0  # Ngưỡng thời gian ngáp (giây)
+        self.yawn_size_threshold = 0.5  # Ngưỡng tỷ lệ chiều cao/chiều rộng miệng
 
     def start_monitoring(self):
         try:
@@ -134,12 +139,26 @@ class DriverMonitor:
                     elif label == 1:  # Mouth
                         mouth_detected = True
                         pred = torch.softmax(self.yawn_model(obj_tensor)[0], dim=0)
-                        yawn_state = "No Yawn" if pred[0] > 0.5 else "Yawn"
+                        preliminary_yawn_state = "No Yawn" if pred[0] > 0.5 else "Yawn"
+                        # Tính kích thước miệng
+                        mouth_width = x2 - x1
+                        mouth_height = y2 - y1
+                        mouth_aspect_ratio = mouth_height / mouth_width if mouth_width > 0 else 0
+                        # Theo dõi thời gian và kích thước ngáp
+                        if preliminary_yawn_state == "Yawn" and mouth_aspect_ratio > self.yawn_size_threshold:
+                            if self.yawn_start_time is None:
+                                self.yawn_start_time = time.time()
+                            self.yawn_duration = time.time() - self.yawn_start_time
+                            self.current_yawn_state = "Yawn" if self.yawn_duration >= self.yawn_threshold else "No Yawn"
+                        else:
+                            self.yawn_start_time = None
+                            self.yawn_duration = 0
+                            self.current_yawn_state = "No Yawn"
                         cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
-                        cv2.putText(annotated_frame, f"Mouth: {yawn_state}", (int(x1), int(y1) - 10),
+                        cv2.putText(annotated_frame, f"Mouth: {self.current_yawn_state}", (int(x1), int(y1) - 10),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
         self.current_eye_state = eye_state if eyes_detected else self.current_eye_state
-        self.current_yawn_state = yawn_state if mouth_detected else self.current_yawn_state
         self.update_state()
         if hasattr(self, 'evaluator') and self.is_evaluating:
             self.evaluator.log_frame(frame_start)
@@ -159,7 +178,7 @@ class DriverMonitor:
         if self.eye_closed_time > self.config['eye_closure_threshold']:
             alert_message = f"⚠️ Eyes closed too long ({int(self.eye_closed_time)}s)!"
             alert_triggered = True
-        elif self.current_yawn_state == "Yawn":
+        elif self.current_yawn_state == "Yawn" and self.yawn_duration >= self.yawn_threshold:
             alert_message = "⚠️ Yawn detected!"
             alert_triggered = True
 

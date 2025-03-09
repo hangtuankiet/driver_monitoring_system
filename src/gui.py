@@ -251,10 +251,11 @@ class DriverMonitoringGUI:
     def show_settings(self):
         settings_window = tk.Toplevel(self.root)
         settings_window.title("Settings")
-        settings_window.geometry("400x500")
+        settings_window.geometry("400x600")  # Tăng chiều cao để chứa thêm trường
         settings_window.configure(bg="#ECEFF1")
 
-        tk.Label(settings_window, text="Camera/Video Settings", font=("Arial", 12, "bold"), fg="#263238", bg="#ECEFF1").pack(pady=10)
+        tk.Label(settings_window, text="Camera/Video Settings", font=("Arial", 12, "bold"), fg="#263238",
+                 bg="#ECEFF1").pack(pady=10)
         tk.Label(settings_window, text="Camera ID:", fg="#263238", bg="#ECEFF1").pack()
         camera_id = ttk.Entry(settings_window)
         camera_id.insert(0, str(self.logic.config['capture_device']))
@@ -265,39 +266,57 @@ class DriverMonitoringGUI:
         video_path.insert(0, self.logic.config['video_path'])
         video_path.pack()
 
-        tk.Label(settings_window, text="Alert Settings", font=("Arial", 12, "bold"), fg="#263238", bg="#ECEFF1").pack(pady=10)
+        tk.Label(settings_window, text="Alert Settings", font=("Arial", 12, "bold"), fg="#263238", bg="#ECEFF1").pack(
+            pady=10)
         tk.Label(settings_window, text="Eye Closure Threshold (seconds):", fg="#263238", bg="#ECEFF1").pack()
         eye_threshold = ttk.Entry(settings_window)
         eye_threshold.insert(0, str(self.logic.config['eye_closure_threshold']))
         eye_threshold.pack()
 
-        tk.Label(settings_window, text="Audio Settings", font=("Arial", 12, "bold"), fg="#263238", bg="#ECEFF1").pack(pady=10)
+        tk.Label(settings_window, text="Yawn Duration Threshold (seconds):", fg="#263238", bg="#ECEFF1").pack()
+        yawn_threshold = ttk.Entry(settings_window)
+        yawn_threshold.insert(0, str(self.logic.config['yawn_threshold']))
+        yawn_threshold.pack()
+
+        tk.Label(settings_window, text="Yawn Size Threshold (aspect ratio):", fg="#263238", bg="#ECEFF1").pack()
+        yawn_size_threshold = ttk.Entry(settings_window)
+        yawn_size_threshold.insert(0, str(self.logic.config['yawn_size_threshold']))
+        yawn_size_threshold.pack()
+
+        tk.Label(settings_window, text="Audio Settings", font=("Arial", 12, "bold"), fg="#263238", bg="#ECEFF1").pack(
+            pady=10)
         sound_enabled_var = tk.BooleanVar(value=self.logic.config['sound_enabled'])
-        tk.Checkbutton(settings_window, text="Enable Alert Sound", variable=sound_enabled_var, fg="#263238", bg="#ECEFF1").pack(pady=5)
+        tk.Checkbutton(settings_window, text="Enable Alert Sound", variable=sound_enabled_var, fg="#263238",
+                       bg="#ECEFF1").pack(pady=5)
         tk.Label(settings_window, text="Volume:", fg="#263238", bg="#ECEFF1").pack()
-        volume_scale = ttk.Scale(settings_window, from_=0, to=1, orient="horizontal", value=self.logic.config['sound_volume'])
+        volume_scale = ttk.Scale(settings_window, from_=0, to=1, orient="horizontal",
+                                 value=self.logic.config['sound_volume'])
         volume_scale.pack(pady=5)
 
         save_alerts_var = tk.BooleanVar(value=self.logic.config['save_alerts'])
-        tk.Checkbutton(settings_window, text="Save Alert History", variable=save_alerts_var, fg="#263238", bg="#ECEFF1").pack(pady=10)
+        tk.Checkbutton(settings_window, text="Save Alert History", variable=save_alerts_var, fg="#263238",
+                       bg="#ECEFF1").pack(pady=10)
 
         def save_settings():
             try:
                 self.logic.config['capture_device'] = int(camera_id.get())
                 self.logic.config['video_path'] = video_path.get()
                 self.logic.config['eye_closure_threshold'] = float(eye_threshold.get())
+                self.logic.config['yawn_threshold'] = float(yawn_threshold.get())
+                self.logic.config['yawn_size_threshold'] = float(yawn_size_threshold.get())
                 self.logic.config['sound_enabled'] = sound_enabled_var.get()
                 self.logic.config['sound_volume'] = volume_scale.get()
                 self.logic.config['save_alerts'] = save_alerts_var.get()
                 self.logic.config_manager.save_config()
                 self.logic.sound_enabled = self.logic.config['sound_enabled']
+                self.logic.yawn_threshold = self.logic.config['yawn_threshold']
+                self.logic.yawn_size_threshold = self.logic.config['yawn_size_threshold']
                 messagebox.showinfo("Success", "Settings saved successfully!")
                 settings_window.destroy()
             except ValueError as e:
                 messagebox.showerror("Error", "Invalid value!")
 
         ttk.Button(settings_window, text="Save Settings", command=save_settings, style="Green.TButton").pack(pady=20)
-
     def show_alerts(self):
         alerts_window = tk.Toplevel(self.root)
         alerts_window.title("Alert History")

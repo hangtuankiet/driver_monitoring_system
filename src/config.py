@@ -8,6 +8,8 @@ class ConfigManager:
         'yawn_model_path': "models/vgg16/yawn/mouth.pt",
         'alert_sound': "sound/eawr.wav",
         'eye_closure_threshold': 2.1,
+        'yawn_threshold': 2.0,
+        'yawn_size_threshold': 0.5,
         'capture_device': 0,
         'video_path': "video/",
         'save_alerts': True,
