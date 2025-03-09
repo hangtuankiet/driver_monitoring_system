@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torchvision.models as models
 from ultralytics import YOLO
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="torchvision.models._utils")
 
 class CustomVGG16(nn.Module):
     def __init__(self, num_classes=2):
