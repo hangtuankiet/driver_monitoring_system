@@ -144,6 +144,3 @@ python main.py
 
 ## Acknowledgments
 This project was developed as part of a scientific research assignment at the University of Nha Trang. Special thanks to our instructors and peers for their support.
-```
-
----
