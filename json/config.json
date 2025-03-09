@@ -1,12 +1,12 @@
 {
-    "yolo_model_path": "../models/yolov10m/train/weights/best.pt",
-    "eye_model_path": "../models/eye/model_eye.h5",
-    "yawn_model_path": "../models/yawn/model_yawn.h5",
-    "alert_sound": "../sound/eawr.wav",
+    "yolo_model_path": "models/yolov10/yolov10n/best.pt",
+    "eye_model_path": "models/vgg16/eye/eye.pt",
+    "yawn_model_path": "models/vgg16/yawn/mouth.pt",
+    "alert_sound": "sound/eawr.wav",
     "eye_closure_threshold": 2.1,
     "capture_device": 0,
-    "video_path": "../video/",
+    "video_path": "video/",
     "save_alerts": true,
     "sound_enabled": true,
-    "sound_volume": 0.29069767441860467
+    "sound_volume": 0.5
 }
