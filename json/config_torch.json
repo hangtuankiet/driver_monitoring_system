@@ -1,0 +1,12 @@
+{
+    "yolo_model_path": "../models/yolov10m/train/weights/best.pt",
+    "eye_model_path": "../models/eye/eye.pt",
+    "yawn_model_path": "../models/yawn/mouth.pt",
+    "alert_sound": "../sound/eawr.wav",
+    "eye_closure_threshold": 2.1,
+    "capture_device": 0,
+    "video_path": "../video/",
+    "save_alerts": true,
+    "sound_enabled": true,
+    "sound_volume": 0.5
+}

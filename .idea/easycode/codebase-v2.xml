@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="com.obiscr.chatgpt.settings.EasyCodeState">
+    <option name="projectFiles" value="$PROJECT_DIR$/alerts/alert_history.json;D:/NTU/Can_su/Python/VGG_YOLO_Project/evaluation/realtime_eval_20250224_153743.json;D:/NTU/Can_su/Python/VGG_YOLO_Project/evaluation/stats_20250224_145851.json;D:/NTU/Can_su/Python/VGG_YOLO_Project/json/config.json;D:/NTU/Can_su/Python/VGG_YOLO_Project/models/yolov10m/train/args.yaml;D:/NTU/Can_su/Python/VGG_YOLO_Project/models/yolov10n/train/args.yaml;D:/NTU/Can_su/Python/VGG_YOLO_Project/models/yolov10s/train/args.yaml;D:/NTU/Can_su/Python/VGG_YOLO_Project/src/driver_monitoring.py;D:/NTU/Can_su/Python/VGG_YOLO_Project/src/eye_yawn_test.py;D:/NTU/Can_su/Python/VGG_YOLO_Project/src/same.py;D:/NTU/Can_su/Python/VGG_YOLO_Project/src/system_evaluator.py;D:/NTU/Can_su/Python/VGG_YOLO_Project/src/test.py;D:/NTU/Can_su/Python/VGG_YOLO_Project/src/vgg_yolo_eye.py;D:/NTU/Can_su/Python/VGG_YOLO_Project/src/ygg_yolo_yawn.py;D:/NTU/Can_su/Python/VGG_YOLO_Project/src/yolo.py" />
+  </component>
+</project>

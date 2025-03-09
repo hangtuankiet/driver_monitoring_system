@@ -1,0 +1,7 @@
+/models/
+/sound/
+/vgg16_model_savedmodel/
+/video/
+/alerts/
+/evaluation/
+.gitattributes
