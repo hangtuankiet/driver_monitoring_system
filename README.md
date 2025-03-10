@@ -96,7 +96,7 @@ Ensure the following model files are placed in the correct directories:
 Contact the authors if these files are not included.
 
 ### Step 5: Configure the Application
-Edit `json/config_torch.json` to match your setup:
+Edit `json/config.json` to match your setup:
 ```json
 {
     "yolo_model_path": "models/yolov10/yolov10n/best.pt",
