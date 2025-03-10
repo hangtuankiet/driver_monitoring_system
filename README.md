@@ -18,11 +18,12 @@ This project was created to explore the application of AI in real-time driver mo
 driver_monitoring_system/
 ├── src/
 │   ├── __init__.py
-│   ├── models.py           # AI model definitions (YOLO, VGG16)
+│   ├── models.py          # AI model definitions (YOLO, VGG16)
 │   ├── logic.py           # Core logic (DriverMonitor class)
 │   ├── gui.py             # GUI implementation
 │   ├── utils.py           # Utility functions (preprocessing, logging, etc.)
-│   └── config.py          # Configuration management
+│   ├── config.py          # Configuration management
+│   └── evaluator.py       # Performance evaluation module
 ├── models/
 │   ├── yolov10/
 │   │   └── yolov10n/
@@ -33,7 +34,7 @@ driver_monitoring_system/
 │   │   └── yawn/
 │   │       └── mouth.pt   # Custom VGG16 weights for yawn detection
 ├── json/
-│   └── config_torch.json  # Configuration file
+│   └── config.json        # Configuration file
 ├── logs/
 │   └── driver_monitoring.log  # Log file
 ├── alerts/
@@ -42,8 +43,6 @@ driver_monitoring_system/
 │   └── eawr.wav           # Alert sound file
 ├── video/
 │   └── (video files)      # Optional video input files
-├── system_evaluator.py    # Performance evaluation module
-├── LICENSE                # MIT License file
 └── main.py                # Entry point to run the application
 ```
 
