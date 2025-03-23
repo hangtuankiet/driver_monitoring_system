@@ -14,26 +14,48 @@ from .config import ConfigManager
 from .utils import setup_logging, preprocess_image, play_alarm, create_storage_directories
 from .evaluator import SystemPerformanceEvaluator
 
+# Constants
+EYE_CLASSES = ['Closed', 'Open']
+MOUTH_CLASSES = ['no_yawn', 'yawn']
+FRAME_SIZE = (640, 480)
+
+
 class DriverMonitor:
     def __init__(self):
+        """
+        Initialize the DriverMonitor with configurations, models, and state variables.
+        """
+        # Initialize configuration and logging
         self.config_manager = ConfigManager()
         self.config = self.config_manager.config
-        setup_logging()
+        setup_logging(log_level=logging.INFO)
         pygame.mixer.init()
-        self.initialize_models()
-        self.initialize_state_variables()
 
-    def initialize_models(self):
+        # Log device and configuration details
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        logging.info(f"Using device: {self.device}")
+        logging.info(f"Loaded configuration: {self.config}")
+
+        # Initialize models and state variables
+        self._initialize_models()
+        self._initialize_state_variables()
+
+    def _initialize_models(self):
+        """
+        Load YOLO and VGG16 models for detection and classification.
+        """
         try:
             self.yolo_model = load_yolo_model(self.config['yolo_model_path'])
-            self.eye_model = load_vgg16_model(self.config['eye_model_path'])
-            self.yawn_model = load_vgg16_model(self.config['yawn_model_path'])
+            self.vgg_model = load_vgg16_model(self.config['vgg_model_path'])
             logging.info("Models initialized successfully")
         except Exception as e:
             logging.error(f"Error initializing models: {str(e)}")
             raise
 
-    def initialize_state_variables(self):
+    def _initialize_state_variables(self):
+        """
+        Initialize state variables for monitoring and tracking.
+        """
         self.cap = None
         self.is_monitoring = False
         self.alert_active = False
@@ -43,31 +65,58 @@ class DriverMonitor:
         self.alert_history = []
         self.is_evaluating = False
         self.eval_start_time = None
-        self.eval_duration = 300
+        self.eval_duration = 300  # 5 minutes
+
+        # Eye and yawn state tracking
         self.current_eye_state = "Open"
         self.current_yawn_state = "No Yawn"
         self.eye_closed_time = 0
-        self.start_time = None
-        self.sound_enabled = self.config['sound_enabled']
-        # Thêm biến để theo dõi thời gian và kích thước ngáp
+        self.eye_closure_start_time = None
+        self.last_eye_closure_time = None
         self.yawn_start_time = None
         self.yawn_duration = 0
-        self.yawn_threshold = 2.0  # Ngưỡng thời gian ngáp (giây)
-        self.yawn_size_threshold = 0.5  # Ngưỡng tỷ lệ chiều cao/chiều rộng miệng
+        self.last_yawn_time = None
+        self.yawn_preliminary_start_time = None
+        self.yawn_preliminary_duration = 0
+        self.yawn_min_duration = 0.5
+
+        # Detection timeout for resetting states
+        self.last_detection_time = None
+        self.detection_timeout = 1.0
+
+        # Alert sound management
+        self.last_alert_time = 0  # Thời gian của cảnh báo cuối cùng
+        self.alert_cooldown = 5.0  # Thời gian chờ giữa các cảnh báo (giây)
 
     def start_monitoring(self):
+        """
+        Start monitoring using the camera.
+
+        Returns:
+            tuple: (success: bool, error_message: str or None)
+        """
         try:
+            logging.info(f"Attempting to open camera with device index: {self.config['capture_device']}")
             self.cap = cv2.VideoCapture(self.config['capture_device'])
             if not self.cap.isOpened():
                 raise Exception("Cannot open camera")
             self.is_monitoring = True
-            logging.info("Camera monitoring started")
+            logging.info("Camera monitoring started successfully")
             return True, None
         except Exception as e:
             logging.error(f"Error starting camera: {str(e)}")
             return False, str(e)
 
     def start_monitoring_video(self, video_path):
+        """
+        Start monitoring using a video file.
+
+        Args:
+            video_path (str): Path to the video file.
+
+        Returns:
+            tuple: (success: bool, error_message: str or None)
+        """
         try:
             self.cap = cv2.VideoCapture(video_path)
             if not self.cap.isOpened():
@@ -80,6 +129,9 @@ class DriverMonitor:
             return False, str(e)
 
     def stop_monitoring(self):
+        """
+        Stop monitoring and release resources.
+        """
         self.is_monitoring = False
         if self.cap:
             self.cap.release()
@@ -87,168 +139,456 @@ class DriverMonitor:
         logging.info("Monitoring stopped")
 
     def update_video(self):
+        """
+        Update video frame, process it, and return the processed image for display.
+
+        Returns:
+            tuple: (success: bool, imgtk: ImageTk.PhotoImage or error_message: str)
+        """
         if not self.is_monitoring:
-            return False, None
+            logging.warning("Monitoring is not active")
+            return False, "Monitoring is not active"
+
         try:
             ret, frame = self.cap.read()
             if not ret:
-                logging.warning("Failed to read frame")
-                return False, None
+                logging.warning("Failed to read frame from camera")
+                return False, "Failed to read frame"
+
+            # Preprocess frame
             frame = cv2.flip(frame, 1)
-            frame = cv2.resize(frame, (640, 480))
+            frame = cv2.resize(frame, FRAME_SIZE)
+
+            # Update FPS
             self.frame_count += 1
-            if time.time() - self.last_time > 1:
+            current_time = time.time()
+            if current_time - self.last_time >= 1:
                 self.fps = self.frame_count
                 self.frame_count = 0
-                self.last_time = time.time()
+                self.last_time = current_time
+
+            # Analyze frame
+            start_time = time.time()
             annotated_frame = self.analyze_frame(frame)
             frame_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(frame_rgb)
             imgtk = ImageTk.PhotoImage(image=img)
+            logging.info(f"Frame processed successfully, time: {time.time() - start_time:.3f}s")
             return True, imgtk
+
+        except KeyError as e:
+            logging.error(f"Configuration key missing: {str(e)}. Please check config.json.")
+            return False, str(e)
         except Exception as e:
             logging.error(f"Error updating video: {str(e)}")
             return False, str(e)
 
+    def reset_states(self):
+        """
+        Reset all states and durations when no face is detected for too long.
+        """
+        self.current_eye_state = "Open"
+        self.eye_closed_time = 0
+        self.eye_closure_start_time = None
+        self.last_eye_closure_time = None
+        self.current_yawn_state = "No Yawn"
+        self.yawn_start_time = None
+        self.yawn_duration = 0
+        self.last_yawn_time = None
+        self.yawn_preliminary_start_time = None
+        self.yawn_preliminary_duration = 0
+        logging.info("No face detected for too long, resetting all states and durations")
+
     def analyze_frame(self, frame):
+        """
+        Analyze the frame to detect eye and mouth states using YOLO and VGG models.
+
+        Args:
+            frame (numpy.ndarray): Input frame to analyze.
+
+        Returns:
+            numpy.ndarray: Annotated frame with detection results.
+        """
         frame_start = time.time()
         annotated_frame = frame.copy()
         results = self.yolo_model(annotated_frame)
         eyes_detected, mouth_detected = False, False
 
-        for result in results:
-            for box in result.boxes.data:
-                x1, y1, x2, y2, conf, cls = box.tolist()
-                if conf < 0.3:
-                    continue
-                label = int(cls)
-                obj = annotated_frame[int(y1):int(y2), int(x1):int(x2)]
-                if obj.size == 0:
-                    continue
-                obj_tensor = preprocess_image(obj)
-                if obj_tensor is None:
-                    continue
-                with torch.no_grad():
-                    if label == 0:  # Eyes
-                        eyes_detected = True
-                        pred = torch.softmax(self.eye_model(obj_tensor)[0], dim=0)
-                        eye_state = "Open" if pred[0] > 0.5 else "Closed"
-                        cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-                        cv2.putText(annotated_frame, f"Eyes: {eye_state}", (int(x1), int(y1) - 10),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                    elif label == 1:  # Mouth
-                        mouth_detected = True
-                        pred = torch.softmax(self.yawn_model(obj_tensor)[0], dim=0)
-                        preliminary_yawn_state = "No Yawn" if pred[0] > 0.5 else "Yawn"
-                        # Tính kích thước miệng
-                        mouth_width = x2 - x1
-                        mouth_height = y2 - y1
-                        mouth_aspect_ratio = mouth_height / mouth_width if mouth_width > 0 else 0
-                        # Theo dõi thời gian và kích thước ngáp
-                        if preliminary_yawn_state == "Yawn" and mouth_aspect_ratio > self.yawn_size_threshold:
-                            if self.yawn_start_time is None:
-                                self.yawn_start_time = time.time()
-                            self.yawn_duration = time.time() - self.yawn_start_time
-                            self.current_yawn_state = "Yawn" if self.yawn_duration >= self.yawn_threshold else "No Yawn"
-                        else:
-                            self.yawn_start_time = None
-                            self.yawn_duration = 0
-                            self.current_yawn_state = "No Yawn"
-                        cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
-                        cv2.putText(annotated_frame, f"Mouth: {self.current_yawn_state}", (int(x1), int(y1) - 10),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        # Extract bounding boxes for eyes and mouth
+        boxes = [(box.tolist(), int(box[5]), box[4]) for result in results for box in result.boxes.data]
+        eyes = [(x1, y1, x2, y2, conf) for (x1, y1, x2, y2, conf, cls), label, conf in boxes if label == 0]
+        mouths = [(x1, y1, x2, y2, conf) for (x1, y1, x2, y2, conf, cls), label, conf in boxes if label == 1]
 
-        self.current_eye_state = eye_state if eyes_detected else self.current_eye_state
-        self.update_state()
+        # Sort by confidence and limit to top detections
+        eyes = sorted(eyes, key=lambda x: x[4], reverse=True)[:2]
+        mouths = sorted(mouths, key=lambda x: x[4], reverse=True)[:1]
+
+        # Process eyes
+        for x1, y1, x2, y2, conf in eyes:
+            if conf < self.config['confidence_threshold']:
+                continue
+            obj = annotated_frame[int(y1):int(y2), int(x1):int(x2)]
+            if obj.size == 0:
+                continue
+            obj_tensor = preprocess_image(obj)
+            if obj_tensor is None:
+                continue
+            with torch.no_grad():
+                pred = torch.softmax(self.vgg_model(obj_tensor)[0], dim=0)
+            eyes_detected = self.process_eyes(pred, x1, y1, x2, y2, annotated_frame)
+
+        # Process mouth
+        for x1, y1, x2, y2, conf in mouths:
+            if conf < self.config['confidence_threshold']:
+                continue
+            obj = annotated_frame[int(y1):int(y2), int(x1):int(x2)]
+            if obj.size == 0:
+                continue
+            obj_tensor = preprocess_image(obj)
+            if obj_tensor is None:
+                continue
+            with torch.no_grad():
+                pred = torch.softmax(self.vgg_model(obj_tensor)[0], dim=0)
+            mouth_detected = self.process_mouth(pred, x1, y1, x2, y2, annotated_frame)
+
+        # Reset states if no face is detected for too long
+        current_time = time.time()
+        if not eyes_detected and not mouth_detected:
+            if self.last_detection_time is None:
+                self.last_detection_time = current_time
+            elif (current_time - self.last_detection_time) > self.detection_timeout:
+                self.reset_states()
+        else:
+            self.last_detection_time = current_time
+
+        # Log if no detections
+        if not eyes_detected:
+            logging.debug("No eyes detected, maintaining previous eye state")
+        if not mouth_detected:
+            logging.debug("No mouth detected, maintaining previous mouth state")
+
+        # Log frame for evaluation if active
         if hasattr(self, 'evaluator') and self.is_evaluating:
             self.evaluator.log_frame(frame_start)
+
         return annotated_frame
 
-    def update_state(self):
-        if self.current_eye_state == "Closed":
-            if self.start_time is None:
-                self.start_time = time.time()
-            self.eye_closed_time = time.time() - self.start_time
-        else:
-            self.eye_closed_time = 0
-            self.start_time = None
+    def process_eyes(self, pred, x1, y1, x2, y2, annotated_frame):
+        """
+        Process eye prediction from VGG16 and calculate eye closure duration.
 
+        Args:
+            pred (torch.Tensor): Prediction probabilities from VGG model.
+            x1, y1, x2, y2 (float): Bounding box coordinates.
+            annotated_frame (numpy.ndarray): Frame to annotate.
+
+        Returns:
+            bool: True if eyes were processed successfully.
+        """
+        eye_probs = pred[:2]
+        eye_probs = eye_probs / torch.sum(eye_probs)
+        eye_idx = eye_probs.argmax().item()
+        vgg_eye_state = EYE_CLASSES[eye_idx]
+        logging.info(f"Eyes VGG State: {vgg_eye_state}")
+
+        current_time = time.time()
+        if vgg_eye_state == "Closed":
+            if self.eye_closure_start_time is None:
+                self.eye_closure_start_time = current_time
+            self.eye_closed_time = current_time - self.eye_closure_start_time
+            self.current_eye_state = "Closed" if self.eye_closed_time >= self.config[
+                'eye_closure_threshold'] else "Open"
+            self.last_eye_closure_time = current_time
+            logging.info(f"Eye closure duration: {self.eye_closed_time:.4f}")
+        else:
+            if self.last_eye_closure_time and (current_time - self.last_eye_closure_time) > self.config[
+                'yawn_grace_period']:
+                self.eye_closure_start_time = None
+                self.eye_closed_time = 0
+                self.current_eye_state = "Open"
+                self.last_eye_closure_time = None
+                logging.info("Eye state reset due to grace period timeout")
+            else:
+                logging.debug("Within grace period, maintaining eye state")
+
+        logging.info(f"Final Eye State: {self.current_eye_state}")
+        cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+        cv2.putText(annotated_frame, f"Eyes: {self.current_eye_state}", (int(x1), int(y1) - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        return True
+
+    def process_mouth(self, pred, x1, y1, x2, y2, annotated_frame):
+        """
+        Process mouth prediction and detect yawn.
+
+        Args:
+            pred (torch.Tensor): Prediction probabilities from VGG model.
+            x1, y1, x2, y2 (float): Bounding box coordinates.
+            annotated_frame (numpy.ndarray): Frame to annotate.
+
+        Returns:
+            bool: True if mouth was processed successfully.
+        """
+        mouth_probs = pred[2:]
+        mouth_probs = mouth_probs / torch.sum(mouth_probs)
+        yawn_confidence = mouth_probs[1].item()
+        vgg_mouth_state = MOUTH_CLASSES[1] if yawn_confidence > self.config['yawn_confidence_threshold'] else \
+        MOUTH_CLASSES[0]
+        logging.info(f"Mouth VGG State: {vgg_mouth_state}, Yawn Confidence: {yawn_confidence:.4f}")
+
+        # Calculate mouth aspect ratio
+        mouth_width = x2 - x1
+        mouth_height = y2 - y1
+        mouth_aspect_ratio = mouth_height / mouth_width if mouth_width > 0 else 0
+        logging.info(f"Mouth aspect ratio: {mouth_aspect_ratio:.4f}")
+
+        yawn_size_threshold_high = 0.7
+
+        # Determine preliminary yawn state
+        if mouth_height < 10:
+            preliminary_yawn_state = "no_yawn"
+            logging.info("Mouth height too small, setting preliminary yawn state to 'no_yawn'")
+        else:
+            preliminary_yawn_state = "no_yawn"
+            if vgg_mouth_state == "yawn" and mouth_aspect_ratio > self.config['yawn_size_threshold']:
+                preliminary_yawn_state = "yawn"
+                logging.info("Yawn detected based on VGG state and aspect ratio")
+            elif mouth_aspect_ratio > yawn_size_threshold_high:
+                preliminary_yawn_state = "yawn"
+                logging.info("Yawn detected based on high mouth aspect ratio")
+
+        # Update yawn state and duration
+        current_time = time.time()
+        if preliminary_yawn_state == "yawn":
+            if self.yawn_preliminary_start_time is None:
+                self.yawn_preliminary_start_time = current_time
+                logging.info("Preliminary yawn detection started")
+            self.yawn_preliminary_duration = current_time - self.yawn_preliminary_start_time
+            logging.info(f"Preliminary yawn duration: {self.yawn_preliminary_duration:.4f}")
+
+            if self.yawn_preliminary_duration >= self.yawn_min_duration:
+                if self.yawn_start_time is None:
+                    self.yawn_start_time = current_time
+                    logging.info("Yawn detection started")
+                self.yawn_duration = current_time - self.yawn_start_time
+                self.current_yawn_state = "Yawn" if self.yawn_duration >= self.config['yawn_threshold'] else "No Yawn"
+                self.last_yawn_time = current_time
+                logging.info(f"Yawn duration: {self.yawn_duration:.4f}")
+            else:
+                self.yawn_duration = 0
+        else:
+            if self.last_yawn_time and (current_time - self.last_yawn_time) > self.config['yawn_grace_period']:
+                self.yawn_start_time = None
+                self.yawn_duration = 0
+                self.current_yawn_state = "No Yawn"
+                self.last_yawn_time = None
+                self.yawn_preliminary_start_time = None
+                self.yawn_preliminary_duration = 0
+                logging.info("Yawn state reset due to grace period timeout")
+            else:
+                logging.debug("Within grace period, maintaining yawn state")
+
+        logging.info(f"Final Mouth State: {self.current_yawn_state}")
+        cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
+        cv2.putText(annotated_frame, f"Mouth: {self.current_yawn_state}", (int(x1), int(y1) - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        return True
+
+    def update_state(self):
+        """
+        Update the state of the driver based on eye and yawn detection.
+
+        Returns:
+            tuple: (eye_state, yawn_state, eye_closed_time, yawn_duration, alert_message, alert_triggered)
+        """
+        eye_state = self.current_eye_state
+        yawn_state = self.current_yawn_state
         alert_triggered = False
-        alert_message = ""
-        if self.eye_closed_time > self.config['eye_closure_threshold']:
+        alert_message = None
+
+        # Check for eye closure alert
+        if self.current_eye_state == "Closed" and self.eye_closed_time > self.config['eye_closure_threshold']:
             alert_message = f"⚠️ Eyes closed too long ({int(self.eye_closed_time)}s)!"
             alert_triggered = True
-        elif self.current_yawn_state == "Yawn" and self.yawn_duration >= self.yawn_threshold:
+            logging.info("Eye closure alert triggered")
+            self.save_alert(alert_message, yawn_duration=0.0)
+        # Check for yawn alert
+        elif self.current_yawn_state == "Yawn" and self.yawn_duration >= self.config['yawn_threshold']:
             alert_message = "⚠️ Yawn detected!"
             alert_triggered = True
-
-        if alert_triggered:
-            self.trigger_alert(alert_message)
+            logging.info("Yawn alert triggered")
+            self.save_alert(alert_message, yawn_duration=self.yawn_duration)
         else:
-            self.alert_active = False
+            alert_message = f"🚗 Status: Monitoring ({self.get_source_type()})"
 
-        return self.current_eye_state, self.current_yawn_state, self.eye_closed_time, alert_message if self.alert_active else "🚗 Status: Normal", self.alert_active
+        # Play alert sound if triggered
+        if alert_triggered and self.config['sound_enabled']:
+            logging.info("Attempting to play alert sound")
+            self.play_alert_sound()
 
-    def trigger_alert(self, message):
-        if not self.alert_active and self.sound_enabled:
-            threading.Thread(target=play_alarm, args=(self.config['alert_sound'],)).start()
-            self.save_alert(message)
-            if self.is_evaluating:
-                timestamp = time.time() - self.eval_start_time
-                print(f"Alert triggered at {timestamp:.2f}s: {message}")
-        self.alert_active = True
+        return eye_state, yawn_state, self.eye_closed_time, self.yawn_duration, alert_message, alert_triggered
 
-    def save_alert(self, message):
+    def save_alert(self, message, yawn_duration=None):
+        """
+        Save alert information to a JSON file.
+
+        Args:
+            message (str): Alert message to save.
+            yawn_duration (float, optional): Duration of the yawn, if applicable.
+        """
         if not self.config['save_alerts']:
             return
+
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        alert_data = {'timestamp': timestamp, 'message': message, 'eye_closed_time': self.eye_closed_time}
+        alert_data = {
+            'timestamp': timestamp,
+            'message': message,
+            'eye_closed_time': self.eye_closed_time,
+            'yawn_duration': yawn_duration if yawn_duration is not None else 0.0
+        }
         self.alert_history.append(alert_data)
-        with open('alerts/alert_history.json', 'w') as f:
-            json.dump(self.alert_history, f, indent=4)
+
+        try:
+            with open('alerts/alert_history.json', 'w') as f:
+                json.dump(self.alert_history, f, indent=4)
+        except Exception as e:
+            logging.error(f"Error saving alert to JSON: {str(e)}")
+
+    def play_alert_sound(self):
+        """
+        Play the alert sound in a separate thread with cooldown management.
+        """
+        current_time = time.time()
+
+        # Kiểm tra nếu đã đủ thời gian cooldown kể từ cảnh báo cuối cùng
+        if current_time - self.last_alert_time < self.alert_cooldown:
+            logging.info("Alert sound skipped due to cooldown period")
+            return
+
+        # Kiểm tra nếu không có âm thanh nào đang phát
+        if not self.alert_active:
+            self.alert_active = True
+            self.last_alert_time = current_time
+            logging.info("Playing alert sound...")
+
+            # Hàm chạy trong luồng để phát âm thanh và đặt lại trạng thái
+            def play_and_reset():
+                try:
+                    play_alarm(self.config['alert_sound'])
+                except Exception as e:
+                    logging.error(f"Error playing alert sound: {str(e)}")
+                finally:
+                    self.alert_active = False
+                    logging.info("Alert sound finished, alert_active reset to False")
+
+            # Khởi động luồng để phát âm thanh
+            threading.Thread(target=play_and_reset).start()
+        else:
+            logging.info("Alert sound skipped because another alert is active")
 
     def start_evaluation(self, video_path, ground_truth):
+        """
+        Start performance evaluation on a video.
+
+        Args:
+            video_path (str): Path to the video file.
+            ground_truth (dict): Ground truth data for evaluation.
+
+        Returns:
+            tuple: (success: bool, error_message: str or None)
+        """
         if not self.is_monitoring:
             success, error = self.start_monitoring_video(video_path)
             if not success:
                 return False, error
+
         self.is_evaluating = True
         self.eval_start_time = time.time()
         self.evaluator = SystemPerformanceEvaluator(self)
         self.evaluator.ground_truth = ground_truth
-        print("Starting performance evaluation on video...")
+        logging.info("Starting performance evaluation on video...")
         return True, None
 
     def evaluate_performance(self, video_path, ground_truth):
+        """
+        Evaluate system performance on a video.
+
+        Args:
+            video_path (str): Path to the video file.
+            ground_truth (dict): Ground truth data for evaluation.
+
+        Returns:
+            tuple: (success: bool, error_message: str or None)
+        """
         try:
             return self.start_evaluation(video_path, ground_truth)
         except Exception as e:
-            print(f"Error during evaluation: {str(e)}")
+            logging.error(f"Error during evaluation: {str(e)}")
             self.stop_evaluation()
             return False, str(e)
 
     def stop_evaluation(self):
+        """
+        Stop evaluation and return statistics.
+
+        Returns:
+            tuple: (stats: dict, final_stats: dict or None)
+        """
         self.is_evaluating = False
-        stats = self.evaluator.finalize_evaluation()
+        stats = None
         final_stats = None
-        if hasattr(self.evaluator, 'ground_truth') and self.evaluator.ground_truth:
-            final_stats = self.evaluator.finalize_evaluation(self.evaluator.ground_truth)
+
+        if hasattr(self, 'evaluator'):
+            stats = self.evaluator.finalize_evaluation()
+            if self.evaluator.ground_truth:
+                final_stats = self.evaluator.finalize_evaluation(self.evaluator.ground_truth)
+
         self.stop_monitoring()
         return stats, final_stats
 
     def get_fps(self):
+        """
+        Get the current FPS.
+
+        Returns:
+            int: Frames per second.
+        """
         return self.fps
 
     def get_eye_state(self):
+        """
+        Get the current eye state.
+
+        Returns:
+            str: Current eye state ("Open" or "Closed").
+        """
         return self.current_eye_state
 
     def get_yawn_state(self):
+        """
+        Get the current yawn state.
+
+        Returns:
+            str: Current yawn state ("No Yawn" or "Yawn").
+        """
         return self.current_yawn_state
 
     def get_eye_closed_time(self):
+        """
+        Get the eye closure duration.
+
+        Returns:
+            float: Duration of eye closure in seconds.
+        """
         return self.eye_closed_time
 
     def get_source_type(self):
+        """
+        Get the source type (Camera or Video).
+
+        Returns:
+            str: Source type ("Camera", "Video", or "Unknown").
+        """
         if self.cap is None or not self.is_monitoring:
             return "Unknown"
         return "Camera" if self.cap.get(cv2.CAP_PROP_POS_FRAMES) == 0 else "Video"
