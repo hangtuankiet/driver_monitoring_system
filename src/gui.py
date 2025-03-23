@@ -6,15 +6,44 @@ from datetime import datetime
 import json
 import time
 
+
 class DriverMonitoringGUI:
-    def __init__(self, root):
+    """A GUI application for the Smart Driver Monitoring System.
+
+    This class provides a graphical interface for monitoring driver behavior using
+    the `DriverMonitor` logic backend. It displays real-time video feed, status indicators,
+    and alerts for eye closure and yawning, with options to start/stop monitoring,
+    evaluate performance, view alerts, and adjust settings.
+
+    Attributes:
+        root (tk.Tk): The main Tkinter window.
+        logic (DriverMonitor): The backend logic for driver monitoring.
+        is_paused (bool): Indicates if monitoring is paused.
+        is_monitoring (bool): Indicates if monitoring is active.
+    """
+
+    def __init__(self, root: tk.Tk) -> None:
+        """Initialize the DriverMonitoringGUI with the main window and logic backend.
+
+        Args:
+            root (tk.Tk): The Tkinter root window for the GUI.
+
+        Sets up the GUI components, including the menu, video display, status indicators,
+        and control buttons. Also initializes the `DriverMonitor` instance for backend logic.
+        """
         self.root = root
         self.logic = DriverMonitor()
         self.is_paused = False
         self.is_monitoring = False
         self.setup_gui()
 
-    def setup_gui(self):
+    def setup_gui(self) -> None:
+        """Set up the main GUI layout and components.
+
+        Configures the window title, size, and background color, and initializes
+        the menu, main frames, video display, status indicators, and control buttons.
+        Also sets up a window close handler.
+        """
         self.root.title("🚗 Smart Driver Monitoring System")
         self.root.geometry("1024x768")
         self.root.configure(bg="#ECEFF1")
@@ -27,7 +56,12 @@ class DriverMonitoringGUI:
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-    def create_menu(self):
+    def create_menu(self) -> None:
+        """Create the top menu bar with File menu options.
+
+        Adds a File menu with options for settings, viewing alerts, and exiting the application.
+        The menu is styled with a custom background and foreground color.
+        """
         menubar = tk.Menu(self.root, bg="#455A64", fg="#504B38")
         self.root.config(menu=menubar)
         file_menu = tk.Menu(menubar, tearoff=0, bg="#FFFFFF", fg="#504B38")
@@ -37,19 +71,34 @@ class DriverMonitoringGUI:
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.on_closing)
 
-    def create_main_frames(self):
+    def create_main_frames(self) -> None:
+        """Create the main left and right panels for the GUI layout.
+
+        The left panel holds the video display, while the right panel contains
+        status indicators and control buttons.
+        """
         self.left_panel = Frame(self.root, bg="#ECEFF1")
         self.left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.right_panel = Frame(self.root, bg="#ECEFF1")
         self.right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, padx=10, pady=10)
 
-    def create_video_display(self):
+    def create_video_display(self) -> None:
+        """Create the video display area in the left panel.
+
+        Sets up a frame with a black background to display the video feed,
+        and adds a label to hold the video frames.
+        """
         self.frame_video = Frame(self.left_panel, bg="black", bd=3, relief="ridge")
         self.frame_video.pack(pady=10, fill=tk.BOTH, expand=True)
         self.lbl_video = Label(self.frame_video, bg="black")
         self.lbl_video.pack()
 
-    def create_status_indicators(self):
+    def create_status_indicators(self) -> None:
+        """Create status indicators in the right panel.
+
+        Adds labels and progress bars to display FPS, eye closure duration,
+        yawn duration, and overall status. The indicators are styled for clarity.
+        """
         status_frame = Frame(self.right_panel, bg="#ECEFF1")
         status_frame.pack(pady=10, fill=tk.X)
 
@@ -69,7 +118,12 @@ class DriverMonitoringGUI:
         self.lbl_yawn = Label(status_frame, text="🗣️ Yawn: --", font=("Arial", 14), fg="#263238", bg="#ECEFF1")
         self.lbl_yawn.pack()
 
-    def create_control_buttons(self):
+    def create_control_buttons(self) -> None:
+        """Create control buttons and toolbar in the right panel.
+
+        Adds buttons for starting/pausing monitoring, evaluating performance,
+        and accessing settings and alerts. Also configures button styles for a consistent look.
+        """
         btn_frame = Frame(self.right_panel, bg="#ECEFF1")
         btn_frame.pack(pady=20)
 
@@ -105,7 +159,12 @@ class DriverMonitoringGUI:
         style.configure("green.Horizontal.TProgressbar", troughcolor="#ECEFF1", background="#4CAF50")
         style.configure("red.Horizontal.TProgressbar", troughcolor="#ECEFF1", background="#F44336")
 
-    def toggle_monitoring(self):
+    def toggle_monitoring(self) -> None:
+        """Toggle the monitoring state between start, pause, and resume.
+
+        If monitoring is not active, shows input source options. If paused, resumes monitoring.
+        If active, pauses monitoring and updates the UI accordingly.
+        """
         if not self.is_monitoring:
             self.show_start_options()
         elif self.is_paused:
@@ -118,7 +177,12 @@ class DriverMonitoringGUI:
             self.btn_monitor.config(text="▶ Resume")
             self.lbl_status.config(text="🚗 Status: Paused")
 
-    def show_start_options(self):
+    def show_start_options(self) -> None:
+        """Display a dialog to select the input source for monitoring.
+
+        Opens a new window with options to start monitoring using a camera or a video file.
+        The dialog is modal to ensure user interaction before proceeding.
+        """
         top = tk.Toplevel(self.root)
         top.title("Select Input Source")
         top.geometry("300x150")
@@ -132,7 +196,14 @@ class DriverMonitoringGUI:
         ttk.Button(top, text="Video", command=lambda: [self.start_video_selection(top), top.destroy()],
                    style="Blue.TButton").pack(pady=5)
 
-    def start_video_selection(self, top=None):
+    def start_video_selection(self, top: tk.Toplevel = None) -> None:
+        """Open a file dialog to select a video file for monitoring.
+
+        Args:
+            top (tk.Toplevel, optional): The parent dialog window to close after selection.
+
+        Initiates monitoring with the selected video file if successful, otherwise shows an error.
+        """
         video_path = filedialog.askopenfilename(
             title="Select Video",
             initialdir=self.logic.config['video_path'],
@@ -149,7 +220,12 @@ class DriverMonitoringGUI:
             else:
                 messagebox.showerror("Error", error)
 
-    def start_monitoring(self):
+    def start_monitoring(self) -> None:
+        """Start real-time monitoring using the camera.
+
+        Initiates camera-based monitoring if successful, otherwise displays an error message.
+        Updates the UI to reflect the monitoring state.
+        """
         success, error = self.logic.start_monitoring()
         if success:
             self.is_monitoring = True
@@ -160,7 +236,12 @@ class DriverMonitoringGUI:
         else:
             messagebox.showerror("Error", error)
 
-    def toggle_evaluation(self):
+    def toggle_evaluation(self) -> None:
+        """Toggle performance evaluation mode.
+
+        If not evaluating, prompts for a video file and ground truth data to start evaluation.
+        If already evaluating, stops the evaluation and displays results.
+        """
         if not self.logic.is_evaluating:
             video_path = filedialog.askopenfilename(
                 title="Select Video for Evaluation",
@@ -197,7 +278,12 @@ class DriverMonitoringGUI:
         else:
             self.stop_evaluation()
 
-    def stop_evaluation(self):
+    def stop_evaluation(self) -> None:
+        """Stop the performance evaluation and display results.
+
+        Stops the evaluation process, resets the UI, and shows a message with the results
+        if available.
+        """
         stats, final_stats = self.logic.stop_evaluation()
         self.is_paused = False
         self.is_monitoring = False
@@ -209,7 +295,13 @@ class DriverMonitoringGUI:
         if final_stats is not None:
             messagebox.showinfo("Success", "Performance evaluation completed. Results saved!")
 
-    def update_video_thread(self):
+    def update_video_thread(self) -> None:
+        """Start a thread to continuously update the video feed and UI.
+
+        Runs a background thread to process video frames, update the video display,
+        and refresh status indicators. The thread stops if monitoring is paused or
+        an error occurs.
+        """
         def update():
             while self.logic.is_monitoring and not self.is_paused:
                 success, result = self.logic.update_video()
@@ -262,7 +354,12 @@ class DriverMonitoringGUI:
 
         threading.Thread(target=update, daemon=True).start()
 
-    def show_settings(self):
+    def show_settings(self) -> None:
+        """Display a settings window to configure monitoring parameters.
+
+        Opens a modal window allowing the user to adjust camera settings, alert thresholds,
+        audio settings, and alert history saving options. Changes are saved to the configuration.
+        """
         settings_window = tk.Toplevel(self.root)
         settings_window.title("Settings")
         settings_window.geometry("400x600")
@@ -329,7 +426,13 @@ class DriverMonitoringGUI:
 
         ttk.Button(settings_window, text="Save Settings", command=save_settings, style="Green.TButton").pack(pady=20)
 
-    def show_alerts(self):
+    def show_alerts(self) -> None:
+        """Display a window showing the history of alerts.
+
+        Opens a new window with a table listing past alerts, including timestamps,
+        alert messages, eye closure times, and yawn durations. Provides options to
+        export alerts to CSV or clear the history.
+        """
         alerts_window = tk.Toplevel(self.root)
         alerts_window.title("Alert History")
         alerts_window.geometry("900x400")
@@ -406,7 +509,12 @@ class DriverMonitoringGUI:
         ttk.Button(button_frame, text="Clear History", command=clear_history, style="Red.TButton").pack(side=tk.LEFT,
                                                                                                         padx=5)
 
-    def on_closing(self):
+    def on_closing(self) -> None:
+        """Handle the window close event.
+
+        Prompts the user to confirm exiting the application. If confirmed, stops
+        monitoring and closes the application.
+        """
         if messagebox.askokcancel("Exit", "Do you want to exit?"):
             self.logic.stop_monitoring()
             self.root.quit()
