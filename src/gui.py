@@ -100,6 +100,8 @@ class DriverMonitoringGUI:
         style.map("Gray.TButton", background=[("active", "#616161")])
         style.configure("Blue.TButton", background="#2196F3", foreground="#504B38")
         style.map("Blue.TButton", background=[("active", "#1976D2")])
+        style.configure("Red.TButton", background="#F44336", foreground="#504B38")
+        style.map("Red.TButton", background=[("active", "#D32F2F")])
         style.configure("green.Horizontal.TProgressbar", troughcolor="#ECEFF1", background="#4CAF50")
         style.configure("red.Horizontal.TProgressbar", troughcolor="#ECEFF1", background="#F44336")
 
@@ -226,12 +228,23 @@ class DriverMonitoringGUI:
                 self.root.after(0, lambda: self.lbl_video.config(image=imgtk))
                 self.lbl_video.image = imgtk
 
-                eye_state, yawn_state, eye_closed_time, status_text, alert_triggered = self.logic.update_state()
+                eye_state, yawn_state, eye_closed_time, yawn_duration, status_text, alert_triggered = self.logic.update_state()
 
                 self.root.after(0, lambda: self.lbl_fps.config(text=f"FPS: {self.logic.get_fps()}"))
-                self.root.after(0, lambda: self.eye_progress.config(value=min(eye_closed_time, self.logic.config['eye_closure_threshold']) * 33))
-                self.root.after(0, lambda: self.yawn_progress.config(value=100 if yawn_state == "Yawn" else 0))
-                self.root.after(0, lambda: self.lbl_status.config(text=status_text, fg="red" if alert_triggered else "#263238"))
+
+                eye_progress_value = min(eye_closed_time, self.logic.config['eye_closure_threshold']) / \
+                                     self.logic.config['eye_closure_threshold'] * 100
+                self.root.after(0, lambda: self.eye_progress.config(value=eye_progress_value))
+
+                if yawn_duration > 0:
+                    yawn_progress_value = min(yawn_duration, self.logic.config['yawn_threshold']) / self.logic.config[
+                        'yawn_threshold'] * 100
+                else:
+                    yawn_progress_value = 0
+                self.root.after(0, lambda: self.yawn_progress.config(value=yawn_progress_value))
+
+                self.root.after(0, lambda: self.lbl_status.config(text=status_text,
+                                                                  fg="red" if alert_triggered else "#263238"))
                 self.root.after(0, lambda: self.lbl_eye.config(text=f"👀 Eyes: {eye_state}"))
                 self.root.after(0, lambda: self.lbl_yawn.config(text=f"🗣️ Yawn: {yawn_state}"))
                 self.root.after(0, lambda: self.frame_video.config(bg="red" if alert_triggered else "black"))
@@ -239,7 +252,8 @@ class DriverMonitoringGUI:
                 if self.logic.is_evaluating and hasattr(self, 'eval_info_label') and self.eval_info_label:
                     elapsed = time.time() - self.logic.eval_start_time
                     remaining = max(0, self.logic.eval_duration - elapsed)
-                    self.root.after(0, lambda: self.eval_info_label.config(text=f"⏱ Evaluation: {int(remaining)}s | FPS: {self.logic.get_fps()}"))
+                    self.root.after(0, lambda: self.eval_info_label.config(
+                        text=f"⏱ Evaluation: {int(remaining)}s | FPS: {self.logic.get_fps()}"))
                     if elapsed >= self.logic.eval_duration:
                         self.stop_evaluation()
                         break
@@ -251,7 +265,7 @@ class DriverMonitoringGUI:
     def show_settings(self):
         settings_window = tk.Toplevel(self.root)
         settings_window.title("Settings")
-        settings_window.geometry("400x600")  # Tăng chiều cao để chứa thêm trường
+        settings_window.geometry("400x600")
         settings_window.configure(bg="#ECEFF1")
 
         tk.Label(settings_window, text="Camera/Video Settings", font=("Arial", 12, "bold"), fg="#263238",
@@ -308,34 +322,65 @@ class DriverMonitoringGUI:
                 self.logic.config['sound_volume'] = volume_scale.get()
                 self.logic.config['save_alerts'] = save_alerts_var.get()
                 self.logic.config_manager.save_config()
-                self.logic.sound_enabled = self.logic.config['sound_enabled']
-                self.logic.yawn_threshold = self.logic.config['yawn_threshold']
-                self.logic.yawn_size_threshold = self.logic.config['yawn_size_threshold']
                 messagebox.showinfo("Success", "Settings saved successfully!")
                 settings_window.destroy()
             except ValueError as e:
                 messagebox.showerror("Error", "Invalid value!")
 
         ttk.Button(settings_window, text="Save Settings", command=save_settings, style="Green.TButton").pack(pady=20)
+
     def show_alerts(self):
         alerts_window = tk.Toplevel(self.root)
         alerts_window.title("Alert History")
-        alerts_window.geometry("600x400")
+        alerts_window.geometry("900x400")
         alerts_window.configure(bg="#ECEFF1")
 
-        columns = ('Time', 'Alert', 'Eye Closure Time')
+        columns = ('Time', 'Alert', 'Eye Closure Time', 'Yawn Duration')
         tree = ttk.Treeview(alerts_window, columns=columns, show='headings')
+
+        tree.column('Time', width=150)
+        tree.column('Alert', width=300)
+        tree.column('Eye Closure Time', width=120)
+        tree.column('Yawn Duration', width=120)
+
         for col in columns:
             tree.heading(col, text=col)
-            tree.column(col, width=150)
+
+        tree.tag_configure('eye_alert', background='#C8E6C9')
+        tree.tag_configure('yawn_alert', background='#FFCDD2')
+
         try:
             with open('alerts/alert_history.json', 'r') as f:
                 alerts = json.load(f)
                 for alert in alerts:
-                    tree.insert('', 'end', values=(alert['timestamp'], alert['message'], f"{alert['eye_closed_time']:.1f}s"))
+                    eye_time = f"{alert['eye_closed_time']:.2f}s" if alert['eye_closed_time'] > 0 else "--"
+                    yawn_duration = float(alert.get('yawn_duration', 0))
+                    yawn_time = f"{yawn_duration:.2f}s" if yawn_duration > 0 else "--"
+
+                    message = alert['message']
+                    if "Eyes closed" in message:
+                        tag = 'eye_alert'
+                        message = f"👀 {message}"
+                    else:
+                        tag = 'yawn_alert'
+                        message = f"🗣️ {message}"
+
+                    tree.insert('', 'end', values=(alert['timestamp'], message, eye_time, yawn_time), tags=(tag,))
         except FileNotFoundError:
-            tree.insert('', 'end', values=('No data', '', ''))
+            tree.insert('', 'end', values=('No data', '', '', ''))
         tree.pack(fill='both', expand=True)
+
+        def clear_history():
+            if messagebox.askyesno("Confirm", "Are you sure you want to clear the alert history?"):
+                try:
+                    with open('alerts/alert_history.json', 'w') as f:
+                        json.dump([], f)
+                    for item in tree.get_children():
+                        tree.delete(item)
+                    tree.insert('', 'end', values=('No data', '', '', ''))
+                    messagebox.showinfo("Success", "Alert history cleared!")
+                except Exception as e:
+                    messagebox.showerror("Error", f"Error clearing history: {str(e)}")
 
         def export_alerts():
             try:
@@ -343,14 +388,23 @@ class DriverMonitoringGUI:
                     alerts = json.load(f)
                 export_file = f"alerts/export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
                 with open(export_file, 'w', encoding='utf-8') as f:
-                    f.write("Time,Alert,Eye Closure Time\n")
+                    f.write("Time,Alert,Eye Closure Time,Yawn Duration\n")
                     for alert in alerts:
-                        f.write(f"{alert['timestamp']},{alert['message']},{alert['eye_closed_time']:.1f}s\n")
+                        eye_time = f"{alert['eye_closed_time']:.2f}s" if alert['eye_closed_time'] > 0 else "--"
+                        yawn_duration = float(alert.get('yawn_duration', 0))
+                        yawn_time = f"{yawn_duration:.2f}s" if yawn_duration > 0 else "--"
+                        f.write(f"{alert['timestamp']},{alert['message']},{eye_time},{yawn_time}\n")
                 messagebox.showinfo("Success", f"Data exported to {export_file}")
             except Exception as e:
                 messagebox.showerror("Error", f"Error exporting data: {str(e)}")
 
-        ttk.Button(alerts_window, text="Export to CSV", command=export_alerts, style="Blue.TButton").pack(pady=10)
+        button_frame = tk.Frame(alerts_window, bg="#ECEFF1")
+        button_frame.pack(pady=10)
+
+        ttk.Button(button_frame, text="Export to CSV", command=export_alerts, style="Blue.TButton").pack(side=tk.LEFT,
+                                                                                                         padx=5)
+        ttk.Button(button_frame, text="Clear History", command=clear_history, style="Red.TButton").pack(side=tk.LEFT,
+                                                                                                        padx=5)
 
     def on_closing(self):
         if messagebox.askokcancel("Exit", "Do you want to exit?"):
