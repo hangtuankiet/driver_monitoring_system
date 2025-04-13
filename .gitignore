@@ -1,5 +1,9 @@
-/models/
-/sound/
-/video/
-/alerts/
-/evaluation/
+*.log
+*.json
+*.pth
+*.pt
+*.wav
+*.mp4
+*.avi
+*.mkv
+*.zip
