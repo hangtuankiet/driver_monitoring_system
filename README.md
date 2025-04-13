@@ -33,6 +33,9 @@ driver_monitoring_system/
 │   │   │   └── eye.pt     # Custom VGG16 weights for eye detection
 │   │   └── yawn/
 │   │       └── mouth.pt   # Custom VGG16 weights for yawn detection
+├── notebook/
+│   ├── driver-drowsiness-detection-using-vgg16.ipynb
+│   ├── yolov10-eye-mouth-detection-real-time-fatigue-ale.ipynb
 ├── json/
 │   └── config.json        # Configuration file
 ├── logs/
