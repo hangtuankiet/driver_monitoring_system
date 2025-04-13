@@ -1,7 +1,5 @@
 *.log
 *.json
-*.pth
-*.pt
 *.wav
 *.mp4
 *.avi
