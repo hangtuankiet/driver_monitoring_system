@@ -21,6 +21,10 @@ FRAME_SIZE = (640, 480)
 
 
 class DriverMonitor:
+    """
+    Core component that manages driver drowsiness monitoring using computer vision.
+    Handles detection and classification of eyes and mouth states to identify fatigue signs.
+    """
     def __init__(self):
         """
         Initialize the DriverMonitor with configurations, models, and state variables.
@@ -34,11 +38,17 @@ class DriverMonitor:
         # Log device and configuration details
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         logging.info(f"Using device: {self.device}")
-        logging.info(f"Loaded configuration: {self.config}")
 
         # Initialize models and state variables
         self._initialize_models()
         self._initialize_state_variables()
+        
+        # Initialize object tracking for better persistence
+        self.last_eye_boxes = []
+        self.last_mouth_boxes = []
+        self.detection_persistence = 5
+        self.eye_track_count = 0
+        self.mouth_track_count = 0
 
     def _initialize_models(self):
         """
@@ -85,8 +95,8 @@ class DriverMonitor:
         self.detection_timeout = 1.0
 
         # Alert sound management
-        self.last_alert_time = 0  # Thời gian của cảnh báo cuối cùng
-        self.alert_cooldown = 5.0  # Thời gian chờ giữa các cảnh báo (giây)
+        self.last_alert_time = 0
+        self.alert_cooldown = 5.0
 
     def start_monitoring(self):
         """
@@ -202,6 +212,9 @@ class DriverMonitor:
     def analyze_frame(self, frame):
         """
         Analyze the frame to detect eye and mouth states using YOLO and VGG models.
+        
+        This is a key function that coordinates object detection with YOLOv10
+        and classification with VGG16 to determine driver state.
 
         Args:
             frame (numpy.ndarray): Input frame to analyze.
@@ -211,7 +224,11 @@ class DriverMonitor:
         """
         frame_start = time.time()
         annotated_frame = frame.copy()
-        results = self.yolo_model(annotated_frame)
+        
+        # Run YOLO detection with reduced confidence for difficult poses
+        detection_confidence = max(0.25, self.config['confidence_threshold'] - 0.2)
+        results = self.yolo_model(annotated_frame, conf=detection_confidence)
+        
         eyes_detected, mouth_detected = False, False
 
         # Extract bounding boxes for eyes and mouth
@@ -222,11 +239,27 @@ class DriverMonitor:
         # Sort by confidence and limit to top detections
         eyes = sorted(eyes, key=lambda x: x[4], reverse=True)[:2]
         mouths = sorted(mouths, key=lambda x: x[4], reverse=True)[:1]
+        
+        # Handle eye detection with tracking
+        if eyes:
+            self.last_eye_boxes = eyes
+            self.eye_track_count = 0
+        elif self.last_eye_boxes and self.eye_track_count < self.detection_persistence:
+            logging.info(f"No eye detection, using tracking from previous frame ({self.eye_track_count}/{self.detection_persistence})")
+            eyes = self.last_eye_boxes
+            self.eye_track_count += 1
+            
+        # Handle mouth detection with tracking
+        if mouths:
+            self.last_mouth_boxes = mouths
+            self.mouth_track_count = 0
+        elif self.last_mouth_boxes and self.mouth_track_count < self.detection_persistence:
+            logging.info(f"No mouth detection, using tracking from previous frame ({self.mouth_track_count}/{self.detection_persistence})")
+            mouths = self.last_mouth_boxes
+            self.mouth_track_count += 1
 
         # Process eyes
         for x1, y1, x2, y2, conf in eyes:
-            if conf < self.config['confidence_threshold']:
-                continue
             obj = annotated_frame[int(y1):int(y2), int(x1):int(x2)]
             if obj.size == 0:
                 continue
@@ -239,8 +272,6 @@ class DriverMonitor:
 
         # Process mouth
         for x1, y1, x2, y2, conf in mouths:
-            if conf < self.config['confidence_threshold']:
-                continue
             obj = annotated_frame[int(y1):int(y2), int(x1):int(x2)]
             if obj.size == 0:
                 continue
@@ -260,6 +291,14 @@ class DriverMonitor:
                 self.reset_states()
         else:
             self.last_detection_time = current_time
+
+        # Add guidance text when no detections persist
+        if not eyes_detected and self.eye_track_count >= self.detection_persistence:
+            cv2.putText(annotated_frame, "Eyes not detected", (10, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        if not mouth_detected and self.mouth_track_count >= self.detection_persistence:
+            cv2.putText(annotated_frame, "Mouth not detected", (10, 60), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
         # Log if no detections
         if not eyes_detected:
@@ -320,6 +359,9 @@ class DriverMonitor:
     def process_mouth(self, pred, x1, y1, x2, y2, annotated_frame):
         """
         Process mouth prediction and detect yawn.
+        
+        Uses a combination of visual features and temporal consistency to accurately
+        detect yawn events while minimizing false positives.
 
         Args:
             pred (torch.Tensor): Prediction probabilities from VGG model.
@@ -329,36 +371,80 @@ class DriverMonitor:
         Returns:
             bool: True if mouth was processed successfully.
         """
+        # Extract and normalize mouth probabilities
         mouth_probs = pred[2:]
         mouth_probs = mouth_probs / torch.sum(mouth_probs)
         yawn_confidence = mouth_probs[1].item()
-        vgg_mouth_state = MOUTH_CLASSES[1] if yawn_confidence > self.config['yawn_confidence_threshold'] else \
-        MOUTH_CLASSES[0]
+        
+        # Get VGG model's classification
+        vgg_mouth_state = MOUTH_CLASSES[1] if yawn_confidence > self.config['yawn_confidence_threshold'] else MOUTH_CLASSES[0]
         logging.info(f"Mouth VGG State: {vgg_mouth_state}, Yawn Confidence: {yawn_confidence:.4f}")
 
-        # Calculate mouth aspect ratio
+        # Calculate mouth measurements
         mouth_width = x2 - x1
         mouth_height = y2 - y1
+        mouth_area = mouth_width * mouth_height
         mouth_aspect_ratio = mouth_height / mouth_width if mouth_width > 0 else 0
-        logging.info(f"Mouth aspect ratio: {mouth_aspect_ratio:.4f}")
+        logging.info(f"Mouth aspect ratio: {mouth_aspect_ratio:.4f}, Area: {mouth_area:.1f}px²")
 
-        yawn_size_threshold_high = 0.7
-
-        # Determine preliminary yawn state
-        if mouth_height < 10:
-            preliminary_yawn_state = "no_yawn"
-            logging.info("Mouth height too small, setting preliminary yawn state to 'no_yawn'")
+        # Strict thresholds to reduce false positives in real-world camera usage
+        strict_confidence_threshold = 0.92
+        strict_aspect_threshold = 0.55
+        very_high_aspect_threshold = 0.8
+        
+        # Temporal consistency check
+        if not hasattr(self, 'mouth_state_history'):
+            self.mouth_state_history = []
+            self.consistency_counter = 0
+            
+        # Store the last 5 frames of mouth state predictions
+        MAX_HISTORY = 5
+        current_frame_state = False
+        
+        # Determine preliminary yawn state with stricter logic
+        preliminary_yawn_state = "no_yawn"
+        
+        # Ignore very small detections (avoid processing noise)
+        if mouth_height < 15 or mouth_width < 15 or mouth_area < 400:
+            logging.info("Mouth detection too small, ignoring")
+        
+        # Primary detection: VGG confidence AND aspect ratio must both be high
+        elif yawn_confidence > strict_confidence_threshold and mouth_aspect_ratio > strict_aspect_threshold:
+            preliminary_yawn_state = "yawn"
+            current_frame_state = True
+            logging.info(f"Potential yawn detected based on strong VGG confidence and aspect ratio")
+        
+        # Secondary detection: extremely high aspect ratio (clear physiological yawn indicator)
+        elif mouth_aspect_ratio > very_high_aspect_threshold:
+            preliminary_yawn_state = "yawn"
+            current_frame_state = True
+            logging.info("Potential yawn detected based on very high mouth aspect ratio")
+            
+        # Update history buffer (using sliding window)
+        self.mouth_state_history.append(current_frame_state)
+        if len(self.mouth_state_history) > MAX_HISTORY:
+            self.mouth_state_history.pop(0)
+            
+        # Calculate consistency score (how many recent frames show yawn)
+        consistency_score = sum(self.mouth_state_history) / max(len(self.mouth_state_history), 1)
+        
+        # Only proceed if we have enough consistent frames showing a yawn
+        if consistency_score >= 0.6 and preliminary_yawn_state == "yawn":
+            self.consistency_counter += 1
+            logging.info(f"Yawn consistency: {consistency_score:.2f}, counter: {self.consistency_counter}")
+        else:
+            self.consistency_counter = max(0, self.consistency_counter - 1)
+            
+        # Only consider yawns that demonstrate consistency 
+        if self.consistency_counter >= 3:
+            logging.info("Consistent yawn pattern detected")
         else:
             preliminary_yawn_state = "no_yawn"
-            if vgg_mouth_state == "yawn" and mouth_aspect_ratio > self.config['yawn_size_threshold']:
-                preliminary_yawn_state = "yawn"
-                logging.info("Yawn detected based on VGG state and aspect ratio")
-            elif mouth_aspect_ratio > yawn_size_threshold_high:
-                preliminary_yawn_state = "yawn"
-                logging.info("Yawn detected based on high mouth aspect ratio")
-
-        # Update yawn state and duration
+            
+        # Update yawn state and duration with temporal filtering
         current_time = time.time()
+        self.yawn_min_duration = 0.8
+        
         if preliminary_yawn_state == "yawn":
             if self.yawn_preliminary_start_time is None:
                 self.yawn_preliminary_start_time = current_time
@@ -384,19 +470,32 @@ class DriverMonitor:
                 self.last_yawn_time = None
                 self.yawn_preliminary_start_time = None
                 self.yawn_preliminary_duration = 0
+                self.consistency_counter = 0
                 logging.info("Yawn state reset due to grace period timeout")
             else:
                 logging.debug("Within grace period, maintaining yawn state")
 
-        logging.info(f"Final Mouth State: {self.current_yawn_state}")
-        cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
-        cv2.putText(annotated_frame, f"Mouth: {self.current_yawn_state}", (int(x1), int(y1) - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        # Add mouth state visualization with confidence
+        color = (0, 0, 255)
+        if self.current_yawn_state == "Yawn":
+            color = (0, 165, 255)
+            
+        cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+        confidence_text = f"{int(yawn_confidence * 100)}%"
+        cv2.putText(annotated_frame, f"Mouth: {self.current_yawn_state} {confidence_text}", 
+                   (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                   
+        # Draw aspect ratio indicator
+        ar_text = f"AR: {mouth_aspect_ratio:.2f}"
+        cv2.putText(annotated_frame, ar_text, 
+                   (int(x1), int(y2) + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+                   
         return True
 
     def update_state(self):
         """
         Update the state of the driver based on eye and yawn detection.
+        Triggers alerts when drowsiness criteria are met.
 
         Returns:
             tuple: (eye_state, yawn_state, eye_closed_time, yawn_duration, alert_message, alert_triggered)
@@ -460,18 +559,15 @@ class DriverMonitor:
         """
         current_time = time.time()
 
-        # Kiểm tra nếu đã đủ thời gian cooldown kể từ cảnh báo cuối cùng
         if current_time - self.last_alert_time < self.alert_cooldown:
             logging.info("Alert sound skipped due to cooldown period")
             return
 
-        # Kiểm tra nếu không có âm thanh nào đang phát
         if not self.alert_active:
             self.alert_active = True
             self.last_alert_time = current_time
             logging.info("Playing alert sound...")
 
-            # Hàm chạy trong luồng để phát âm thanh và đặt lại trạng thái
             def play_and_reset():
                 try:
                     play_alarm(self.config['alert_sound'])
@@ -481,7 +577,6 @@ class DriverMonitor:
                     self.alert_active = False
                     logging.info("Alert sound finished, alert_active reset to False")
 
-            # Khởi động luồng để phát âm thanh
             threading.Thread(target=play_and_reset).start()
         else:
             logging.info("Alert sound skipped because another alert is active")
@@ -575,10 +670,10 @@ class DriverMonitor:
 
     def get_eye_closed_time(self):
         """
-        Get the eye closure duration.
-
+        Get the current eye closed time.
+        
         Returns:
-            float: Duration of eye closure in seconds.
+            float: Time in seconds that eyes have been closed.
         """
         return self.eye_closed_time
 

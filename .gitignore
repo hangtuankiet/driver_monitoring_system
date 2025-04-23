@@ -1,5 +1,95 @@
-/models/
-/sound/
-/video/
-/alerts/
-/evaluation/
+# Python bytecode files
+__pycache__/
+*.py[cod]
+*$py.class
+src/__pycache__/
+src/__pycache__/*.cpython-310.pyc
+src/__pycache__/*.cpython-311.pyc
+src/__pycache__/config.cpython-310.pyc
+src/__pycache__/evaluator.cpython-310.pyc
+src/__pycache__/gui.cpython-310.pyc
+src/__pycache__/gui.cpython-311.pyc
+src/__pycache__/logic.cpython-310.pyc
+src/__pycache__/logic.cpython-311.pyc
+src/__pycache__/models.cpython-310.pyc
+src/__pycache__/utils.cpython-310.pyc
+src/__pycache__/__init__.cpython-310.pyc
+src/__pycache__/__init__.cpython-311.pyc
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.env
+.venv
+env.bak/
+venv.bak/
+.venv/
+.venv/Include/
+.venv/Lib/
+.venv/pyvenv.cfg
+.venv/Scripts/
+.venv/share/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Jupyter Notebook
+.ipynb_checkpoints
+notebook/.ipynb_checkpoints/
+notebook/*.ipynb
+
+# Generated files
+logs/*
+!logs/.gitkeep
+logs/driver_monitoring.log
+
+# Alert files that may contain sensitive data
+alerts/*
+!alerts/.gitkeep
+alerts/alert_history.json
+
+# Evaluation output files
+evaluation/*
+!evaluation/.gitkeep
+
+# Large media files
+*.mp4
+*.avi
+*.mov
+*.mkv
+video/*.mp4
+video/test1.mp4
+
+# Local configuration files
+*.sqlite
+*.db
+json/*.json
+!json/config.json.template
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Specific for this project model files
+# Since these files are large, they should be downloaded separately or from a model repository
+models/vgg16/best_model.pth
+models/yolov10/yolov10n/best.pt
+# But keep the directory structure
+!models/vgg16/.gitkeep
+!models/yolov10/yolov10n/.gitkeep
+
+# Sound files
+sound/*.wav
+!sound/.gitkeep
