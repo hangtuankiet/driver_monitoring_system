@@ -1,148 +1,220 @@
 # Smart Driver Monitoring System
 
-The **Smart Driver Monitoring System** is a scientific research project developed as part of a university assignment at the University of Nha Trang. This system aims to improve driver safety by detecting signs of drowsiness or fatigue using advanced computer vision and deep learning techniques. It utilizes the YOLOv10 model for detecting eyes and mouth, and a custom VGG16 model for classifying eye closure and yawn states. The project was collaboratively developed by **Hàng Tuấn Kiệt** and **Huỳnh Thị Hạnh Nguyên**.
+![License](https://img.shields.io/badge/License-MIT-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.10+-green.svg)
+![OpenCV](https://img.shields.io/badge/OpenCV-4.5+-red.svg)
+![PyTorch](https://img.shields.io/badge/PyTorch-1.13+-orange.svg)
 
-## Project Overview
-This project was created to explore the application of AI in real-time driver monitoring. It provides a practical solution for detecting drowsiness, issuing alerts, and evaluating system performance, serving as a proof-of-concept for academic research.
+The **Smart Driver Monitoring System** is a scientific research project developed at the University of Nha Trang. This system detects driver drowsiness and fatigue in real-time using computer vision and deep learning techniques. It combines YOLOv10 for eye and mouth detection with a custom VGG16 model for state classification to create an effective driver safety monitoring solution.
+
+Developed by **Hàng Tuấn Kiệt** and **Huỳnh Thị Hạnh Nguyên** as part of university research.
 
 ## Features
-- **Drowsiness Detection**: Tracks eye closure duration and yawn frequency to identify fatigue.
-- **Real-time Processing**: Analyzes video feeds from a camera or pre-recorded files.
-- **Audio Alerts**: Emits a warning sound when drowsiness is detected.
-- **Performance Evaluation**: Assesses system accuracy using ground truth data.
-- **GUI**: Offers an intuitive Tkinter-based interface for user interaction.
-- **Configurable Settings**: Allows customization of parameters like eye closure threshold and sound volume.
 
-## Project Structure
-```
-driver_monitoring_system/
-├── src/
-│   ├── __init__.py
-│   ├── models.py          # AI model definitions (YOLO, VGG16)
-│   ├── logic.py           # Core logic (DriverMonitor class)
-│   ├── gui.py             # GUI implementation
-│   ├── utils.py           # Utility functions (preprocessing, logging, etc.)
-│   ├── config.py          # Configuration management
-│   └── evaluator.py       # Performance evaluation module
-├── models/
-│   ├── yolov10/
-│   │   └── yolov10n/
-│   │       └── best.pt    # Pre-trained YOLOv10 weights
-│   ├── vgg16/
-│   │   ├── eye/
-│   │   │   └── eye.pt     # Custom VGG16 weights for eye detection
-│   │   └── yawn/
-│   │       └── mouth.pt   # Custom VGG16 weights for yawn detection
-├── notebook/
-│   ├── driver-drowsiness-detection-using-vgg16.ipynb
-│   ├── yolov10-eye-mouth-detection-real-time-fatigue-ale.ipynb
-├── json/
-│   └── config.json        # Configuration file
-├── logs/
-│   └── driver_monitoring.log  # Log file
-├── alerts/
-│   └── alert_history.json # Alert history storage
-├── sound/
-│   └── eawr.wav           # Alert sound file
-├── video/
-│   └── (video files)      # Optional video input files
-└── main.py                # Entry point to run the application
-```
+- **Real-time Drowsiness Detection**: Monitors eye closure duration and yawn frequency
+- **Multi-model AI Approach**: Uses YOLOv10 for detection and VGG16 for classification
+- **Temporal Analysis**: Applies time-based analysis to reduce false positives
+- **Audio Alerts**: Provides audible warnings when drowsiness is detected
+- **Performance Evaluation**: Includes tools for measuring detection accuracy and latency
+- **User-friendly Interface**: Features a clean Tkinter-based GUI with real-time visualization
+- **Configurable Parameters**: Allows customization of detection thresholds and alert settings
 
-## Prerequisites
-- **Python**: Version 3.8 or higher (tested with 3.10.16).
-- **Conda**: Recommended for environment management.
-- **GPU (optional)**: NVIDIA GPU with CUDA support for faster processing.
+## System Architecture
 
-### Required Libraries
-- `opencv-python`
-- `pygame`
-- `torch`
-- `torchvision`
-- `ultralytics`
-- `pillow`
+The system follows a modular architecture with clear separation of concerns:
 
-## Installation
+![System Architecture](https://i.imgur.com/9FaWJdN.png)
 
-### Step 1: Obtain the Project
-Since this is a university project, it may not be hosted publicly. Contact **Hàng Tuấn Kiệt** or **Huỳnh Thị Hạnh Nguyên** to request the source code or download it from the provided university repository (if available).
+For a detailed architecture diagram and component descriptions, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-Alternatively, if shared via a compressed file:
-1. Extract the ZIP file to a local directory (e.g., `D:\NTU\Can_su\VGG_YOLO_Project\`).
+## Requirements
 
-### Step 2: Set Up the Conda Environment
-Create and activate a Conda environment:
+### Hardware
+- **Camera**: Standard webcam for real-time monitoring
+- **CPU**: Intel i5 or AMD Ryzen 5 (or equivalent) with 4+ cores
+- **RAM**: 8GB minimum, 16GB recommended
+- **GPU**: NVIDIA GPU with CUDA support recommended (for optimal performance)
+- **Storage**: 2GB available disk space for models and application
+
+### Software
+- **Python**: Version 3.10 or higher
+- **Key Libraries**:
+  - OpenCV
+  - PyTorch
+  - Ultralytics
+  - Pygame
+  - Tkinter
+  - PIL
+  - NumPy
+
+## Installation Guide
+
+### Prerequisites
+1. Install Python 3.10+
+2. Set up a virtual environment (optional but recommended):
+
 ```bash
-conda create -n torch_gpu python=3.10
-conda activate torch_gpu
+# Using conda (recommended for GPU support)
+conda create -n driver_monitor python=3.10
+conda activate driver_monitor
+
+# OR using venv
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-### Step 3: Install Dependencies
-Install the required libraries:
-```bash
-pip install opencv-python pygame torch torchvision ultralytics pillow
-```
+### Package Installation
 
-For GPU support:
 ```bash
+# Install main dependencies
+pip install opencv-python pygame pillow numpy
+
+# Install PyTorch (CPU version)
+pip install torch torchvision
+
+# OR for NVIDIA GPU support (adjust cuda version as needed)
 pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu118
-```
-*(Adjust `cu118` based on your CUDA version.)*
 
-### Step 4: Prepare Pre-trained Models
-Ensure the following model files are placed in the correct directories:
-- **YOLOv10**: `models/yolov10/yolov10n/best.pt` (download from [Ultralytics](https://github.com/ultralytics/ultralytics) or use your trained model).
-- **VGG16**: 
-  - `models/vgg16/eye/eye.pt` (custom-trained for eye detection).
-  - `models/vgg16/yawn/mouth.pt` (custom-trained for yawn detection).
-
-Contact the authors if these files are not included.
-
-### Step 5: Configure the Application
-Edit `json/config.json` to match your setup:
-```json
-{
-    "yolo_model_path": "models/yolov10/yolov10n/best.pt",
-    "eye_model_path": "models/vgg16/eye/eye.pt",
-    "yawn_model_path": "models/vgg16/yawn/mouth.pt",
-    "alert_sound": "sound/eawr.wav",
-    "eye_closure_threshold": 2.1,
-    "capture_device": 0,
-    "video_path": "video/",
-    "save_alerts": true,
-    "sound_enabled": true,
-    "sound_volume": 0.5
-}
+# Install YOLOv10
+pip install ultralytics
 ```
 
-### Step 6: Add Alert Sound
-Place a `.wav` file (e.g., `eawr.wav`) in the `sound/` directory. Use an existing file or download one from a free sound library.
+### Project Setup
 
-## Running the Application
-Run the main script:
+1. Clone/extract the project to your desired location
+2. Ensure model files are properly placed:
+   - YOLOv10 model at `models/yolov10/yolov10n/best.pt`
+   - VGG16 model at `models/vgg16/best_model.pth`
+3. Verify sound file exists at `sound/eawr.wav`
+4. Configure settings in `json/config.json` as needed
+
+## Usage
+
+### Starting the Application
+
+Run the main application:
+
 ```bash
-conda activate torch_gpu
 python main.py
 ```
 
-- **Camera Mode**: Select "Camera (Real-time)" for webcam input.
-- **Video Mode**: Select "Video" and choose a file from `video/`.
-- **Evaluation Mode**: Select "Evaluate Performance" and provide ground truth data.
+### Main Features
 
-## Usage
-- **Start/Stop**: Use "Start" to begin monitoring and "Pause/Resume" to control it.
-- **Settings**: Adjust parameters via the "Settings" menu.
-- **Alerts**: View and export alert history in the "View Alerts" menu.
-- **Evaluation**: Input drowsy time ranges (e.g., "10-15, 20-23") for performance analysis.
+1. **Real-time Monitoring**:
+   - Select "Camera (Real-time)" from the dropdown menu
+   - Click "Start" to begin monitoring
+   
+2. **Video Analysis**:
+   - Select "Video" from the dropdown menu
+   - Choose a video file from your computer
+   - Click "Start" to process the video
+
+3. **Performance Evaluation**:
+   - Select "Evaluate Performance" from the dropdown menu
+   - Choose a video file and enter ground truth data
+   - Click "Start" to evaluate system performance
+
+4. **Alert Review**:
+   - Click "View Alerts" to see history of detected events
+   - Export alert data to CSV if needed
+
+5. **Settings Adjustment**:
+   - Click "Settings" to adjust detection thresholds
+   - Configure alert sounds and other parameters
+
+## Performance
+
+### Detection Metrics
+
+The system has been evaluated with the following performance metrics:
+
+- **Accuracy**: Approximately 50.7% on test dataset
+- **Sensitivity (Recall)**: ~13.9%
+- **Specificity**: ~62.8%
+- **Precision**: ~11.0%
+- **F1 Score**: ~12.3%
+- **Average Latency**: ~0.049 seconds per frame
+- **Average FPS**: ~14.0 frames per second
+
+*Note: Performance metrics are based on internal testing and may vary based on hardware, lighting conditions, and subject characteristics.*
+
+### System Limitations
+
+- Performance depends on lighting conditions and camera quality
+- May have reduced accuracy with certain eyewear or facial features
+- CPU-only mode has significantly lower frame rates
+- Detection reliability decreases with increasing distance from camera
 
 ## Troubleshooting
-- **FileNotFoundError**: Verify all model and sound files are in place.
-- **ModuleNotFoundError**: Ensure all dependencies are installed.
-- **GPU Issues**: Confirm CUDA compatibility with PyTorch.
+
+### Common Issues
+
+1. **Camera Not Found**:
+   - Verify camera is connected
+   - Check camera index in `config.json` (default is 0)
+   
+2. **Models Not Loading**:
+   - Ensure model files are in correct locations
+   - Check for model file corruption or incomplete downloads
+
+3. **Low Frame Rate**:
+   - Enable GPU acceleration if available
+   - Reduce video resolution in `config.json`
+   - Close other resource-intensive applications
+
+4. **False Detections**:
+   - Adjust thresholds in `config.json`
+   - Improve lighting conditions
+   - Position camera properly facing the driver
+
+## Development
+
+### Project Structure
+
+```
+driver_monitoring_system/
+├── src/                 # Core source code
+│   ├── __init__.py
+│   ├── models.py        # Model loading and management
+│   ├── logic.py         # Core detection logic
+│   ├── gui.py           # User interface
+│   ├── utils.py         # Helper functions
+│   ├── config.py        # Configuration management
+│   └── evaluator.py     # Performance evaluation
+├── models/              # Pre-trained AI models
+├── json/                # Configuration files
+├── logs/                # System logs
+├── alerts/              # Alert history
+├── sound/               # Alert sound files
+├── video/               # Test videos
+├── notebook/            # Development notebooks
+├── main.py              # Application entry point
+└── README.md            # Documentation
+```
+
+### Extending the System
+
+To add new features or modify existing ones:
+
+1. **New Detection Metrics**: Extend `evaluator.py`
+2. **Additional Models**: Modify `models.py` to support more model types
+3. **UI Customization**: Update `gui.py` with additional elements
+4. **Configuration Options**: Add new parameters in `config.py` and `json/config.json`
+
+## License
+
+This project is released for academic and research purposes only.
+Copyright © 2025 University of Nha Trang
+
+## Acknowledgments
+
+- University of Nha Trang for research support
+- Ultralytics for YOLOv10 model architecture
+- PyTorch team for the deep learning framework
 
 ## Authors
+
 - **Hàng Tuấn Kiệt** - University of Nha Trang
 - **Huỳnh Thị Hạnh Nguyên** - University of Nha Trang
 
-## Acknowledgments
-This project was developed as part of a scientific research assignment at the University of Nha Trang. Special thanks to our instructors and peers for their support.
+*For questions or further information, please contact the authors.*

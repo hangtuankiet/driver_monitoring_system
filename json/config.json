@@ -1,1 +1,16 @@
-
+{
+    "yolo_model_path": "models/yolov10/yolov10n/best.pt",
+    "vgg_model_path": "models/vgg16/best_model.pth",
+    "confidence_threshold": 0.6,
+    "eye_closure_threshold": 2.1,
+    "yawn_threshold": 2.0,
+    "yawn_grace_period": 0.5,
+    "yawn_confidence_threshold": 0.85,
+    "yawn_size_threshold": 0.45,
+    "capture_device": 0,
+    "video_path": "video/",
+    "alert_sound": "sound/eawr.wav",
+    "save_alerts": true,
+    "sound_enabled": true,
+    "sound_volume": 0.5
+}
