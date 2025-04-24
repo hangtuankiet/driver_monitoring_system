@@ -6,6 +6,9 @@ import torchvision.transforms as transforms
 from PIL import Image
 import torch
 from datetime import datetime
+from typing import Union
+import numpy as np
+
 
 
 def setup_logging(log_path: str = "logs/driver_monitoring.log", log_level: int = logging.INFO) -> None:
@@ -74,8 +77,7 @@ def setup_logging(log_path: str = "logs/driver_monitoring.log", log_level: int =
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
 
-
-def preprocess_image(image: 'numpy.ndarray') -> torch.Tensor | None:
+def preprocess_image(image: 'np.ndarray') -> Union[torch.Tensor, None]:
     """Preprocess an image for input to a deep learning model.
 
     This function converts an input image (numpy array) into a tensor suitable for

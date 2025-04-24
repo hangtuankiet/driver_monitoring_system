@@ -26,7 +26,7 @@ class SystemPerformanceEvaluator:
             - alerts_triggered (int): Total number of alerts triggered.
         ground_truth_log (list): List of predicted states with timestamps for comparison.
     """
-
+    
     def __init__(self, monitoring_system: object) -> None:
         """Initialize the SystemPerformanceEvaluator with a monitoring system.
 
@@ -90,8 +90,9 @@ class SystemPerformanceEvaluator:
         self.ground_truth_log.append(predicted_state)
         if predicted_state["alert_active"]:
             self.stats["alerts_triggered"] += 1
+    from typing import Union
 
-    def finalize_evaluation(self, manual_ground_truth: list | None = None) -> dict:
+    def finalize_evaluation(self, manual_ground_truth: Union[list, None] = None) -> dict:
         """Finalize the evaluation and compute performance metrics.
 
         Args:

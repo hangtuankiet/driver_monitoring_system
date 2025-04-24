@@ -220,9 +220,7 @@ class DriverMonitor:
         """
         frame_start = time.time() # lấy thời gian hiện tại để bắt đầu đo thời gian xử lí khung hình
         annotated_frame = frame.copy() # tạo bản sao để vẽ lên, tránh làm thay đổi khung hình gốc
-        
-        # YOLO phát hiện mắt và miệng trong khung hình
-        results = self.yolo_model(annotated_frame) 
+        results = self.yolo_model(annotated_frame) # dùng yolov10 đe phát hiện mắt và miệng trong khung hình
         eyes_detected, mouth_detected = False, False # khởi tạo biến để xem có phát hiện được mắt/miệng hay không
 
         # Extract bounding boxes for eyes and mouth
@@ -246,8 +244,7 @@ class DriverMonitor:
         # [:2]: Chỉ lấy tối đa 2 mắt có độ tin cậy cao nhất (vì một khuôn mặt thường có 2 mắt).
         # Tương tự, lấy 1 miệng có độ tin cậy cao nhất.
 
-        # Process eyes 
-        # xử lí tọa độ khung hình then pass to VGG16
+        # Process eyes
         for x1, y1, x2, y2, conf in eyes:
             if conf < self.config['confidence_threshold']: #độ tin cậy nhỏ hơn ngưỡng thì bỏ qua
                 continue
@@ -259,39 +256,21 @@ class DriverMonitor:
                 continue
             with torch.no_grad():
                 pred = torch.softmax(self.vgg_model(obj_tensor)[0], dim=0) #dùng vgg dự đoán trạng thái mắt
-
-        #pass tọa độ to VGG16
             eyes_detected = self.process_eyes(pred, x1, y1, x2, y2, annotated_frame)
             # Xử lý kết quả dự đoán, cập nhật trạng thái mắt (self.current_eye_state), và vẽ thông tin lên annotated_frame.
 
-        # Process mouth 
-        # xử lí tọa độ khung hình then pass to VGG16
+        # Process mouth
         for x1, y1, x2, y2, conf in mouths:
             if conf < self.config['confidence_threshold']:
                 continue
-            # obj = annotated_frame[int(y1):int(y2), int(x1):int(x2)]
-            # if obj.size == 0:
-            #     continue
-            # obj_tensor = preprocess_image(obj)
-            # if obj_tensor is None:
-                # Expand mouth region by 20%
-            height, width = annotated_frame.shape[:2]
-            center_x = (x1 + x2) / 2
-            center_y = (y1 + y2) / 2
-            box_width = x2 - x1
-            box_height = y2 - y1
-            x1 = max(0, center_x - box_width * 0.6)  # Expand by 20%
-            x2 = min(width, center_x + box_width * 0.6)
-            y1 = max(0, center_y - box_height * 0.75) # Expand by 50%
-            y2 = min(height, center_y + box_height * 0.75)
             obj = annotated_frame[int(y1):int(y2), int(x1):int(x2)]
             if obj.size == 0:
                 continue
             obj_tensor = preprocess_image(obj)
+            if obj_tensor is None:
+                continue
             with torch.no_grad():
                 pred = torch.softmax(self.vgg_model(obj_tensor)[0], dim=0)
-                
-            #pass tọa độ to VGG16
             mouth_detected = self.process_mouth(pred, x1, y1, x2, y2, annotated_frame)
 
         # Reset states if no face is detected for too long
@@ -305,26 +284,10 @@ class DriverMonitor:
             self.last_detection_time = current_time
 
         # Log if no detections
-        # if not eyes_detected:
-        #     logging.debug("No eyes detected, maintaining previous eye state")
+        if not eyes_detected:
+            logging.debug("No eyes detected, maintaining previous eye state")
         if not mouth_detected:
-            # Show and save detected mouth frame if any
-            if mouths:
-                x1, y1, x2, y2, _ = mouths[0] # Get coordinates of the first detected mouth
-                mouth_frame = frame[int(y1):int(y2), int(x1):int(x2)]
-                if mouth_frame.size > 0:
-                    # Create directory if it doesn't exist
-                    save_dir = "detected_mouths"
-                    if not os.path.exists(save_dir):
-                        os.makedirs(save_dir)
-                    
-                    # Save frame with timestamp
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                    save_path = os.path.join(save_dir, f"mouth_{timestamp}.jpg")
-                    cv2.imwrite(save_path, mouth_frame)
-                    
-                    cv2.imshow('Detected Mouth', mouth_frame)
-            # logging.debug("No mouth detected, maintaining previous mouth state")
+            logging.debug("No mouth detected, maintaining previous mouth state")
 
         # Log frame for evaluation if active
         if hasattr(self, 'evaluator') and self.is_evaluating:
@@ -351,36 +314,31 @@ class DriverMonitor:
         eye_probs = eye_probs / torch.sum(eye_probs) #chuẩn hóa xác suất về tổng = 1
         eye_idx = eye_probs.argmax().item() #lấy chỉ số lớp có xác suất cao nhất (0 hoặc 1)
         vgg_eye_state = EYE_CLASSES[eye_idx] #lấy tên lớp tương ứng với chỉ số (Open hoặc Closed)
-        # logging.info(f"Eyes VGG State: {vgg_eye_state}")
+        logging.info(f"Eyes VGG State: {vgg_eye_state}")
 
         current_time = time.time() #lấy thời gian hiện tại
 
         #nếu trạng thái mắt là close
         if vgg_eye_state == "Closed":
-
-            #đặt ngay trạng thái mắt là closed
-            self.current_eye_state = "Closed"
             if self.eye_closure_start_time is None: 
                 self.eye_closure_start_time = current_time #nếu lần đầu phát hiện nhắm mắt thì lưu thời gian bắt đầu = current_time
             self.eye_closed_time = current_time - self.eye_closure_start_time #tính thời gian nhắm mắt liên tục = thời gian hiện tại - thời gian bắt đầu nhắm mắt
+
             #nếu thời gian nhắn mắt > ngưỡng thì cập nhật trạng thái mắt và thời gian nhắm mắt
-
-            # self.current_eye_state = "Closed" if self.eye_closed_time >= self.config[
-            #     'eye_closure_threshold'] else "Open"
-
+            self.current_eye_state = "Closed" if self.eye_closed_time >= self.config[
+                'eye_closure_threshold'] else "Open"
             self.last_eye_closure_time = current_time
             logging.info(f"Eye closure duration: {self.eye_closed_time:.4f}")
 
         #nếu trạng thái mắt là open
         else:
-            self.current_eye_state = "Open"
             if self.last_eye_closure_time and (current_time - self.last_eye_closure_time) > self.config[
                 'yawn_grace_period']: #should rename to eye_grace_period
                 self.eye_closure_start_time = None
                 self.eye_closed_time = 0
                 self.current_eye_state = "Open"
                 self.last_eye_closure_time = None
-                # logging.info("Eye state reset due to grace period timeout")
+                logging.info("Eye state reset due to grace period timeout")
             else:
                 logging.debug("Within grace period, maintaining eye state")
 
@@ -406,59 +364,64 @@ class DriverMonitor:
         mouth_probs = mouth_probs / torch.sum(mouth_probs)
         yawn_confidence = mouth_probs[1].item()
         vgg_mouth_state = MOUTH_CLASSES[1] if yawn_confidence > self.config['yawn_confidence_threshold'] else \
-        MOUTH_CLASSES[0] #no yawn
-        # logging.info(f"Mouth VGG State: {vgg_mouth_state}, Yawn Confidence: {yawn_confidence:.4f}")
+        MOUTH_CLASSES[0]
+        logging.info(f"Mouth VGG State: {vgg_mouth_state}, Yawn Confidence: {yawn_confidence:.4f}")
 
         # Calculate mouth aspect ratio
         mouth_width = x2 - x1
         mouth_height = y2 - y1
         mouth_aspect_ratio = mouth_height / mouth_width if mouth_width > 0 else 0
-        # logging.info(f"Mouth aspect ratio: {mouth_aspect_ratio:.4f}")
+        logging.info(f"Mouth aspect ratio: {mouth_aspect_ratio:.4f}")
 
         yawn_size_threshold_high = 0.7
 
-        #Determine preliminary yawn state (xác định trạng thái ngáp sơ bộ)
-        preliminary_yawn_state = vgg_mouth_state  # Trạng thái sơ bộ dựa hoàn toàn vào VGG16
-        # logging.info(f"Trạng thái sơ bộ: {preliminary_yawn_state} dựa trên VGG16")
-       
+        # Determine preliminary yawn state
+        if mouth_height < 10:
+            preliminary_yawn_state = "no_yawn"
+            logging.info("Mouth height too small, setting preliminary yawn state to 'no_yawn'")
+        else:
+            preliminary_yawn_state = "no_yawn"
+            if vgg_mouth_state == "yawn" and mouth_aspect_ratio > self.config['yawn_size_threshold']:
+                preliminary_yawn_state = "yawn"
+                logging.info("Yawn detected based on VGG state and aspect ratio")
+            elif mouth_aspect_ratio > yawn_size_threshold_high:
+                preliminary_yawn_state = "yawn"
+                logging.info("Yawn detected based on high mouth aspect ratio")
+
         # Update yawn state and duration
-       
         current_time = time.time()
         if preliminary_yawn_state == "yawn":
-            self.display = "yawn"
             if self.yawn_preliminary_start_time is None:
                 self.yawn_preliminary_start_time = current_time
-                # logging.info("Preliminary yawn detection started")
+                logging.info("Preliminary yawn detection started")
             self.yawn_preliminary_duration = current_time - self.yawn_preliminary_start_time
-            # logging.info(f"Preliminary yawn duration: {self.yawn_preliminary_duration:.4f}")
+            logging.info(f"Preliminary yawn duration: {self.yawn_preliminary_duration:.4f}")
 
             if self.yawn_preliminary_duration >= self.yawn_min_duration:
                 if self.yawn_start_time is None:
                     self.yawn_start_time = current_time
-                    # logging.info("Yawn detection started")
+                    logging.info("Yawn detection started")
                 self.yawn_duration = current_time - self.yawn_start_time
                 self.current_yawn_state = "Yawn" if self.yawn_duration >= self.config['yawn_threshold'] else "No Yawn"
                 self.last_yawn_time = current_time
                 logging.info(f"Yawn duration: {self.yawn_duration:.4f}")
             else:
                 self.yawn_duration = 0
-
         else:
-           
-                self.display = "no yawn"
+            if self.last_yawn_time and (current_time - self.last_yawn_time) > self.config['yawn_grace_period']:
                 self.yawn_start_time = None
                 self.yawn_duration = 0
-                self.current_yawn_state = "no yawn"
+                self.current_yawn_state = "No Yawn"
                 self.last_yawn_time = None
                 self.yawn_preliminary_start_time = None
                 self.yawn_preliminary_duration = 0
-               
+                logging.info("Yawn state reset due to grace period timeout")
+            else:
+                logging.debug("Within grace period, maintaining yawn state")
 
-        # Vẽ chú thích lên khung hình
         logging.info(f"Final Mouth State: {self.current_yawn_state}")
         cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
-        # cv2.putText(annotated_frame, f"Mouth: {self.current_yawn_state}", (int(x1), int(y1) - 10),
-        cv2.putText(annotated_frame, f"Mouth: {self.display}", (int(x1), int(y1) - 5),
+        cv2.putText(annotated_frame, f"Mouth: {self.current_yawn_state}", (int(x1), int(y1) - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
         return True
 
@@ -491,7 +454,7 @@ class DriverMonitor:
 
         # Play alert sound if triggered
         if alert_triggered and self.config['sound_enabled']:
-            # logging.info("Attempting to play alert sound")
+            logging.info("Attempting to play alert sound")
             self.play_alert_sound()
 
         return eye_state, yawn_state, self.eye_closed_time, self.yawn_duration, alert_message, alert_triggered
