@@ -48,6 +48,12 @@ class DriverMonitor:
         self.detection_persistence = 5
         self.eye_track_count = 0
         self.mouth_track_count = 0
+        
+        # Video synchronization variables
+        self.video_start_time = None
+        self.video_fps = 0
+        self.frame_position = 0
+        self.sync_video = True  # Flag to enable/disable video sync
 
     def _initialize_models(self):
         """
@@ -110,6 +116,8 @@ class DriverMonitor:
             if not self.cap.isOpened():
                 raise Exception("Cannot open camera")
             self.is_monitoring = True
+            # For camera, no need to synchronize
+            self.sync_video = False
             logging.info("Camera monitoring started successfully")
             return True, None
         except Exception as e:
@@ -130,6 +138,17 @@ class DriverMonitor:
             self.cap = cv2.VideoCapture(video_path)
             if not self.cap.isOpened():
                 raise Exception("Cannot open video file")
+            
+            # Get video properties for synchronization
+            self.video_fps = self.cap.get(cv2.CAP_PROP_FPS)
+            self.video_start_time = time.time()
+            self.frame_position = 0
+            self.sync_video = True
+            
+            logging.info(f"Video opened: {video_path}")
+            logging.info(f"Video FPS: {self.video_fps}")
+            logging.info(f"Total frames: {int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))}")
+            
             self.is_monitoring = True
             logging.info("Video monitoring started")
             return True, None
@@ -150,6 +169,7 @@ class DriverMonitor:
     def update_video(self):
         """
         Update video frame, process it, and return the processed image for display.
+        Maintains proper playback speed for video files.
 
         Returns:
             tuple: (success: bool, imgtk: ImageTk.PhotoImage or error_message: str)
@@ -159,10 +179,46 @@ class DriverMonitor:
             return False, "Monitoring is not active"
 
         try:
-            ret, frame = self.cap.read()
-            if not ret:
-                logging.warning("Failed to read frame from camera")
-                return False, "Failed to read frame"
+            # For video files, synchronize playback speed
+            if self.sync_video and self.get_source_type() == "Video":
+                # Calculate what frame we should be on based on elapsed time
+                elapsed_time = time.time() - self.video_start_time
+                target_frame = int(elapsed_time * self.video_fps)
+                
+                # If processing is faster than real-time, wait to maintain correct speed
+                current_frame = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
+                if current_frame < target_frame:
+                    # We're ahead, continue to next frame
+                    ret, frame = self.cap.read()
+                    if not ret:
+                        logging.warning("End of video reached")
+                        return False, "End of video"
+                elif current_frame > target_frame:
+                    # We've fallen behind (processing too slow)
+                    # Skip frames to catch up if we're very behind
+                    if current_frame - target_frame > 10:
+                        logging.warning(f"Video playback running slow. Skipping to catch up. " +
+                                      f"Current: {current_frame}, Target: {target_frame}")
+                        self.cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+                        ret, frame = self.cap.read()
+                        if not ret:
+                            return False, "Failed to read frame after seeking"
+                    else:
+                        # We're not too far behind, just read the next frame
+                        ret, frame = self.cap.read()
+                        if not ret:
+                            return False, "Failed to read frame"
+                else:
+                    # We're exactly where we should be
+                    ret, frame = self.cap.read()
+                    if not ret:
+                        return False, "Failed to read frame"
+            else:
+                # For camera or when sync is disabled, just read the next frame
+                ret, frame = self.cap.read()
+                if not ret:
+                    logging.warning("Failed to read frame from camera/video")
+                    return False, "Failed to read frame"
 
             # Preprocess frame
             frame = cv2.flip(frame, 1)
@@ -182,7 +238,17 @@ class DriverMonitor:
             frame_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(frame_rgb)
             imgtk = ImageTk.PhotoImage(image=img)
-            logging.info(f"Frame processed successfully, time: {time.time() - start_time:.3f}s")
+            
+            # Add playback position indicator for videos
+            if self.get_source_type() == "Video":
+                total_frames = self.cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                current_frame = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
+                progress = f"Frame: {int(current_frame)}/{int(total_frames)} " + \
+                          f"({current_frame/total_frames*100:.1f}%)"
+                logging.debug(progress)
+            
+            processing_time = time.time() - start_time
+            logging.info(f"Frame processed successfully, time: {processing_time:.3f}s")
             return True, imgtk
 
         except KeyError as e:
