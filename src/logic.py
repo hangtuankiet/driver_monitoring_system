@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-import pygame
 import threading
 import time
 from PIL import Image, ImageTk
@@ -33,11 +32,11 @@ class DriverMonitor:
         self.config_manager = ConfigManager()
         self.config = self.config_manager.config
         setup_logging(log_level=logging.INFO)
-        pygame.mixer.init()
-
+        
         # Log device and configuration details
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         logging.info(f"Using device: {self.device}")
+        logging.info(f"Loaded configuration: {self.config}")
 
         # Initialize models and state variables
         self._initialize_models()
@@ -570,7 +569,7 @@ class DriverMonitor:
 
             def play_and_reset():
                 try:
-                    play_alarm(self.config['alert_sound'])
+                    play_alarm(self.config['alert_sound'], volume=self.config.get('sound_volume', 1.0))
                 except Exception as e:
                     logging.error(f"Error playing alert sound: {str(e)}")
                 finally:

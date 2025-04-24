@@ -1,7 +1,7 @@
 import logging
 import numpy as np
-import pygame
 import os
+import winsound  
 import torchvision.transforms as transforms
 import torch
 from datetime import datetime
@@ -111,21 +111,21 @@ def preprocess_image(image: 'np.ndarray') -> torch.Tensor | None:
         return None
 
 
-def play_alarm(sound_path: str) -> None:
-    """Play an alarm sound using pygame.mixer.
+def play_alarm(sound_path: str, volume: float = 1.0) -> None:
+    """Play an alert sound using winsound (Windows) or tkinter (cross-platform).
 
     Args:
         sound_path (str): Path to the sound file to play (e.g., a .wav file).
+        volume (float, optional): Volume level, from 0.0 to 1.0. Not used in winsound
+            but kept for compatibility.
 
-    Raises:
-        pygame.error: If there is an error loading or playing the sound file.
-
-    This function loads and plays the specified sound file using pygame.mixer. Errors
-    during playback are logged but not raised, allowing the program to continue running.
+    This function plays the specified .wav sound file. On Windows, it uses the winsound
+    module which is built into Python. Error handling ensures the program continues
+    even if sound playback fails.
     """
     try:
-        pygame.mixer.music.load(sound_path)
-        pygame.mixer.music.play()
+        winsound.PlaySound(sound_path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+        logging.info(f"Playing alert sound: {sound_path}")
     except Exception as e:
         logging.error(f"Error playing alarm: {str(e)}")
 

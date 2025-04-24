@@ -42,7 +42,6 @@ For a detailed architecture diagram and component descriptions, see [ARCHITECTUR
   - OpenCV
   - PyTorch
   - Ultralytics
-  - Pygame
   - Tkinter
   - PIL
   - NumPy
@@ -67,7 +66,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 ```bash
 # Install main dependencies
-pip install opencv-python pygame pillow numpy
+pip install opencv-python scikit-learn
 
 # Install PyTorch (CPU version)
 pip install torch torchvision
