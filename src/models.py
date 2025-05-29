@@ -1,127 +1,133 @@
-# src/models.py
 import torch
 import torch.nn as nn
 import torchvision.models as models
 from ultralytics import YOLO
 import warnings
 
-# Suppress specific UserWarnings from torchvision to keep logs clean
-warnings.filterwarnings("ignore", category=UserWarning, module="torchvision.models._utils")
+# Suppress torchvision UserWarnings
+warnings.filterwarnings("ignore", category=UserWarning,
+                        module="torchvision.models._utils")
 
-
-class CustomVGG16(nn.Module):
-    """A custom VGG16 model for classification tasks.
-
-    This class modifies the standard VGG16 architecture by replacing the final
-    fully connected layer to support a custom number of output classes. It is
-    designed for tasks such as eye and mouth state classification in driver monitoring.
-
-    Attributes:
-        features (nn.Module): The convolutional feature extraction layers from VGG16.
-        avgpool (nn.Module): The adaptive average pooling layer from VGG16.
-        classifier (nn.Sequential): The modified classifier with a custom final layer.
+class MultiTaskNet(nn.Module):
     """
+    A multi-task neural network with a shared backbone and two separate heads:
+      - Eye head: classifies eye state (Open vs Closed)
+      - Mouth head: classifies mouth state (No Yawn vs Yawn)
 
-    def __init__(self, num_classes: int = 4) -> None:
-        """Initialize the CustomVGG16 model.
+    Supported backbones:
+      * 'vgg16'
+      * 'mobilenet_v2'
+      * 'mobilenet_v3_small'
+      * 'efficientnet_b0'
+    """
+    def __init__(self, backbone_name: str):
+        super().__init__()        # Initialize backbone with pretrained weights
+        if backbone_name == 'vgg16':
+            base = models.vgg16_bn(pretrained=True)
+            feat_dim = 512
+        elif backbone_name == 'mobilenet_v2':
+            base = models.mobilenet_v2(pretrained=True)
+            feat_dim = base.classifier[1].in_features
+        elif backbone_name == 'mobilenet_v3_small':
+            base = models.mobilenet_v3_small(pretrained=True)
+            feat_dim = base.classifier[0].in_features
+        elif backbone_name == 'efficientnet_b0':
+            base = models.efficientnet_b0(pretrained=True)
+            feat_dim = base.classifier[1].in_features
+        else:
+            raise ValueError(f"Unsupported backbone: {backbone_name}")        # Shared feature extractor
+        self.feature = base.features
+        # Unfreeze the last few layers to allow fine-tuning
+        # For deep networks like VGG, only unfreeze a few layers
+        for i, param in enumerate(self.feature.parameters()):
+            # Only make the last ~25% of feature layers trainable
+            if i >= len(list(self.feature.parameters())) * 0.75:
+                param.requires_grad = True
+            else:
+                param.requires_grad = False
+        
+        # Global average pooling
+        self.pool = nn.AdaptiveAvgPool2d(1)
 
-        Args:
-            num_classes (int, optional): Number of output classes for classification.
-                Defaults to 4 (e.g., for eye states: open/closed, and mouth states: yawn/no_yawn).
-
-        The base VGG16 model is loaded without pretrained weights, as weights will be
-        loaded from a custom state dictionary later. The final classifier layer is replaced
-        to match the specified number of classes.
-        """
-        super(CustomVGG16, self).__init__()
-        base_model = models.vgg16(pretrained=False)  # Pretrained weights are not loaded here
-        self.features = base_model.features
-        self.avgpool = base_model.avgpool
-        self.classifier = nn.Sequential(
-            *list(base_model.classifier.children())[:-1],  # Keep all classifier layers except the last
-            nn.Sequential(
-                nn.Linear(4096, 256),
-                nn.ReLU(),
-                nn.Dropout(p=0.5),
-                nn.Linear(256, num_classes)
-            )
+        # Eye classification head (2 classes)
+        self.eye_head = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(feat_dim, 256),
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=0.5),
+            nn.Linear(256, 2)
+        )
+        
+        # Mouth classification head (2 classes)
+        self.mouth_head = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(feat_dim, 256),
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=0.5),
+            nn.Linear(256, 2)
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass through the CustomVGG16 model.
+    def forward(self, x: torch.Tensor):
+        """
+        Forward pass through the multi-task network.
 
         Args:
-            x (torch.Tensor): Input tensor of shape (batch_size, channels, height, width).
+            x (torch.Tensor): Input tensor of shape (batch_size, 3, H, W)
 
         Returns:
-            torch.Tensor: Output tensor of shape (batch_size, num_classes) containing
-                the raw scores for each class.
-
-        The input tensor is passed through the feature extraction layers, average pooling,
-        flattening, and the modified classifier to produce class scores.
+            eye_logits (torch.Tensor): (batch_size, 2)
+            mouth_logits (torch.Tensor): (batch_size, 2)
         """
-        x = self.features(x)
-        x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        x = self.classifier(x)
-        return x
+        feats = self.feature(x)
+        pooled = self.pool(feats)
+        eye_logits = self.eye_head(pooled)
+        mouth_logits = self.mouth_head(pooled)
+        return eye_logits, mouth_logits
 
 
 def load_yolo_model(model_path: str) -> YOLO:
-    """Load a YOLO model from the specified path.
-
+    """
+    Load a YOLO detection model from the specified weights file.
     Args:
-        model_path (str): Path to the YOLO model weights file.
+        model_path (str): Path to the YOLO .pt file
 
     Returns:
-        YOLO: The loaded YOLO model instance, ready for inference.
-
-    Raises:
-        FileNotFoundError: If the model file at `model_path` does not exist.
-        Exception: If there is an error loading the YOLO model.
-
-    This function initializes a YOLO model using the ultralytics library and prints
-    status messages to indicate successful loading.
+        YOLO: Initialized YOLO detector in inference mode
     """
-    print("Loading YOLO model...")
     try:
         model = YOLO(model_path)
-        print("YOLO model loaded successfully.")
         return model
     except Exception as e:
-        print(f"Error loading YOLO model: {str(e)}")
-        raise
+        raise RuntimeError(f"Failed to load YOLO model from {model_path}: {e}")
 
 
-def load_vgg16_model(model_path: str, num_classes: int = 4) -> CustomVGG16:
-    """Load a CustomVGG16 model from the specified path.
+def load_multitask_model(
+    model_path: str,
+    backbone_name: str,
+    device: torch.device = None
+) -> MultiTaskNet:
+    """
+    Load a trained MultiTaskNet from a saved state dict.
 
     Args:
-        model_path (str): Path to the VGG16 model weights file.
-        num_classes (int, optional): Number of output classes for the model.
-            Defaults to 4 (e.g., for eye and mouth state classification).
+        model_path (str): Path to the .pth state dictionary
+        backbone_name (str): One of supported backbones
+        device (torch.device, optional): Device to load the model onto
 
     Returns:
-        CustomVGG16: The loaded CustomVGG16 model instance, moved to the appropriate
-            device (CPU or GPU) and set to evaluation mode.
-
-    Raises:
-        FileNotFoundError: If the model file at `model_path` does not exist.
-        Exception: If there is an error loading the VGG16 model weights.
-
-    This function initializes a CustomVGG16 model, loads its weights from the specified
-    path, moves it to the appropriate device (CUDA if available, otherwise CPU), and
-    sets it to evaluation mode for inference.
+        MultiTaskNet: Model ready for inference (eval mode)
     """
-    print(f"Loading VGG16 model from {model_path}...")
-    try:
-        model = CustomVGG16(num_classes)
-        state_dict = torch.load(model_path)
-        model.load_state_dict(state_dict)
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model = model.to(device).eval()
-        print("VGG16 model loaded successfully.")
-        return model
-    except Exception as e:
-        print(f"Error loading VGG16 model: {str(e)}")
-        raise
+    if device is None:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    model = MultiTaskNet(backbone_name)
+    state = torch.load(model_path, map_location=device)
+    model.load_state_dict(state)
+    model.to(device)
+    model.eval()
+    return model
+
+# Example of dynamic model selection based on config:
+# config = {'yolo_path': 'yolov10.pt', 'cls_path': 'mt_vgg16.pth', 'backbone': 'vgg16'}
+# yolo = load_yolo_model(config['yolo_path'])
+# cls_model = load_multitask_model(config['cls_path'], config['backbone'])

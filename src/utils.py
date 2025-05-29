@@ -4,6 +4,7 @@ import os
 import winsound  
 import torchvision.transforms as transforms
 import torch
+import cv2  
 from datetime import datetime
 
 
@@ -98,14 +99,28 @@ def preprocess_image(image: 'np.ndarray') -> torch.Tensor | None:
     try:
         if image.size == 0:
             raise ValueError("Empty image")
+            
+        # Convert BGR to RGB (OpenCV images are BGR)
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        # Apply histogram equalization to improve contrast
+        # This helps with different lighting conditions
+        if len(image.shape) == 3 and image.shape[2] == 3:
+            # Convert to YUV and equalize Y channel
+            image_yuv = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2YUV)
+            image_yuv[:,:,0] = cv2.equalizeHist(image_yuv[:,:,0])
+            enhanced_image = cv2.cvtColor(image_yuv, cv2.COLOR_YUV2RGB)
+        else:
+            enhanced_image = image_rgb
+            
+        # Preprocessing pipeline
         preprocess = transforms.Compose([
-            transforms.ToPILImage(),
-            transforms.Resize((224, 224)),
+            transforms.ToPILImage(),        transforms.Resize((224, 224)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        return preprocess(image).unsqueeze(0).to(device)
+        return preprocess(enhanced_image).unsqueeze(0).to(device)
     except Exception as e:
         logging.error(f"Error preprocessing image: {str(e)}")
         return None
