@@ -8,6 +8,8 @@ import numpy as np
 import threading
 import logging
 from PIL import Image, ImageTk
+import winsound
+from threading import Thread
 
 from src.ml_engine import MLInferenceEngine
 from src.camera_handler import CameraHandler
@@ -46,7 +48,37 @@ class DriverMonitor:
         self.last_time = time.time()
         self.processing_time = 0.0
         
+        # Simple alert system
+        self.sound_file = "sound/eawr.wav"
+        self.last_alert_time = 0
+        self.alert_cooldown = 3.0  # 3 giây cooldown
+        self.sound_loaded = self._check_sound_file()
+        
         logging.info("DriverMonitor initialized with optimized ML pipeline")
+    
+    def process_frame(self, frame):
+        """
+        Process a single frame directly (for testing/manual processing)
+        Returns annotated frame with alerts
+        """
+        if self.ml_engine.yolo_model is None or self.ml_engine.cls_model is None:
+            # If models not loaded, return frame with error message
+            cv2.putText(frame, "Models not loaded", (10, 30),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            return frame
+        
+        # ML processing
+        start_time = time.time()
+        ml_results = self.ml_engine.process_frame(frame)
+        self.processing_time = time.time() - start_time
+        
+        # Process ML results and add alerts
+        annotated_frame = self._process_ml_results(frame, ml_results)
+        
+        # Update FPS calculation
+        self._update_fps()
+        
+        return annotated_frame
     
     def load_models(self, yolo_path, cls_path, backbone='vgg16'):
         """Load ML models"""
@@ -127,11 +159,20 @@ class DriverMonitor:
                 yawn_result['state'], yawn_result['confidence']
             )
             self._draw_detection(frame, yawn_result, 'mouth')
-        
-        # Check for drowsiness alerts
+          # Check for drowsiness alerts
         self.drowsiness_detector.check_drowsiness_alerts()
         
-        # Add status overlay
+        # Get alert status
+        status = self.drowsiness_detector.get_status()
+        has_alerts = len(status.get('alerts', [])) > 0
+        
+        # Trigger sound alert if needed
+        if has_alerts:
+            self._trigger_simple_alert()
+            # Add red border to frame
+            frame = self._add_red_border(frame)
+        
+        # Add minimal status overlay (no warning text)
         self._add_status_overlay(frame)
         
         return frame
@@ -149,112 +190,39 @@ class DriverMonitor:
             color = (0, 255, 0) if state == "no_yawn" else (255, 0, 0)
         
         # Draw bounding box
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)        
         # Draw label
         label = f"{detection_type}: {state} ({confidence:.2f})"
         cv2.putText(frame, label, (x1, y1-10),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
     
     def _add_status_overlay(self, frame):
-        """Add status information overlay with enhanced RED alerts"""
+        """Clean video overlay - only simple status info, no warning text"""
         status = self.drowsiness_detector.get_status()
         
-        # Check if there are active alerts for red warning overlay
-        has_alerts = len(status['alerts']) > 0
-        
-        # ENHANCED RED WARNING OVERLAY when alerts are active
-        if has_alerts:
-            # DOUBLE THICK RED BORDER - flash effect
-            border_thickness = 20  # Increased from 10
-            flash_time = int(time.time() * 3) % 2  # Flash every 0.33 seconds
-            border_color = (0, 0, 255) if flash_time == 0 else (0, 50, 255)  # Bright to dark red flash
-            
-            # Outer red border
-            cv2.rectangle(frame, (0, 0), (frame.shape[1]-1, frame.shape[0]-1), 
-                         border_color, border_thickness)
-            # Inner red border for extra thickness
-            cv2.rectangle(frame, (border_thickness//2, border_thickness//2), 
-                         (frame.shape[1]-border_thickness//2-1, frame.shape[0]-border_thickness//2-1), 
-                         (0, 0, 255), border_thickness//2)
-            
-            # BRIGHT RED OVERLAY at top - increased coverage
-            red_overlay = frame.copy()
-            cv2.rectangle(red_overlay, (0, 0), (frame.shape[1], 120), (0, 0, 255), -1)
-            cv2.addWeighted(red_overlay, 0.6, frame, 0.4, 0, frame)  # More intense red
-            
-            # LARGE FLASHING WARNING TEXT at top center
-            warning_text = "🚨 NGUY HIỂM - TÀI XẾ BỊ NGỦ GẬT 🚨"
-            text_size = cv2.getTextSize(warning_text, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 4)[0]
-            text_x = max(5, (frame.shape[1] - text_size[0]) // 2)
-            
-            # White outline for visibility
-            cv2.putText(frame, warning_text, (text_x, 40),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 6)
-            # Red text on top
-            cv2.putText(frame, warning_text, (text_x, 40),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
-            
-            # SECOND LINE WARNING
-            warning_text2 = "⚠️ DROWSINESS DETECTED - WAKE UP! ⚠️"
-            text_size2 = cv2.getTextSize(warning_text2, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 3)[0]
-            text_x2 = max(5, (frame.shape[1] - text_size2[0]) // 2)
-            cv2.putText(frame, warning_text2, (text_x2, 80),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 5)
-            cv2.putText(frame, warning_text2, (text_x2, 80),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
-            
-            # RED SIDE PANELS for extra visibility
-            cv2.rectangle(frame, (0, 120), (100, frame.shape[0]), (0, 0, 255), -1)
-            cv2.rectangle(frame, (frame.shape[1]-100, 120), (frame.shape[1], frame.shape[0]), (0, 0, 255), -1)
-        
-        # Status background with RED tint when alerts active
-        bg_color = (50, 0, 0) if has_alerts else (0, 0, 0)  # Dark red when alerts
+        # Simple transparent background for status info
         overlay = frame.copy()
-        cv2.rectangle(overlay, (10, 140), (380, 260), bg_color, -1)
-        cv2.addWeighted(overlay, 0.5, frame, 0.5, 0, frame)
+        cv2.rectangle(overlay, (10, frame.shape[0] - 120), (300, frame.shape[0] - 10), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.3, frame, 0.7, 0, frame)
         
-        # Status text with ENHANCED color coding
-        y_pos = 160
-        eye_color = (0, 0, 255) if status['eye_state'] == "Closed" else (0, 255, 0)
-        eye_thickness = 3 if status['eye_state'] == "Closed" else 2  # Thicker when closed
-        cv2.putText(frame, f"👁️ Eye: {status['eye_state']}", (15, y_pos),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, eye_color, eye_thickness)
+        # Minimal status text at bottom
+        y_pos = frame.shape[0] - 90
         
-        y_pos += 30
-        mouth_color = (0, 0, 255) if status['yawn_state'] == "Yawning" else (0, 255, 0)
-        mouth_thickness = 3 if status['yawn_state'] == "Yawning" else 2  # Thicker when yawning
-        cv2.putText(frame, f"👄 Mouth: {status['yawn_state']}", (15, y_pos),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, mouth_color, mouth_thickness)
+        # Eye state indicator
+        eye_color = (0, 255, 0) if status['eye_state'] == "Open" else (0, 255, 255)
+        cv2.putText(frame, f"Eye: {status['eye_state']}", (15, y_pos),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, eye_color, 1)
         
-        y_pos += 30
-        cv2.putText(frame, f"📊 FPS: {self.fps:.1f}", (15, y_pos),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        # Mouth state indicator
+        y_pos += 20
+        mouth_color = (0, 255, 0) if status['yawn_state'] == "Normal" else (0, 255, 255)
+        cv2.putText(frame, f"Mouth: {status['yawn_state']}", (15, y_pos),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, mouth_color, 1)
         
-        y_pos += 25
-        cv2.putText(frame, f"⚡ ML Time: {self.processing_time*1000:.1f}ms", (15, y_pos),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        
-        # ENHANCED BRIGHT RED alert display with pulsing effect
-        if status['alerts']:
-            for i, alert in enumerate(status['alerts'][:3]):  # Max 3 alerts
-                y_pos = 300 + i * 40  # Moved down to avoid overlap
-                
-                # PULSING RED background with flash effect
-                pulse_intensity = 0.3 + 0.4 * abs(np.sin(time.time() * 4))  # Pulse 4x per second
-                alert_bg = frame.copy()
-                cv2.rectangle(alert_bg, (5, y_pos-30), (frame.shape[1]-5, y_pos+15), (0, 0, 255), -1)
-                cv2.addWeighted(alert_bg, pulse_intensity, frame, 1-pulse_intensity, 0, frame)
-                
-                # THICK WHITE border around alert
-                cv2.rectangle(frame, (5, y_pos-30), (frame.shape[1]-5, y_pos+15), (255, 255, 255), 3)
-                
-                # Alert text with THICK white outline and red fill
-                alert_text = f"🚨🚨 {alert.upper()} 🚨🚨"
-                cv2.putText(frame, alert_text, (15, y_pos),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 5)  # Thick white outline
-                cv2.putText(frame, alert_text, (15, y_pos),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 3)      # Red text
+        # FPS info
+        y_pos += 20
+        cv2.putText(frame, f"FPS: {self.fps:.1f}", (15, y_pos),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     
     def _update_fps(self):
         """Update FPS calculation"""
@@ -329,3 +297,56 @@ class DriverMonitor:
     @property
     def current_alerts(self):
         return self.drowsiness_detector.current_alerts
+    
+    def _check_sound_file(self):
+        """Kiểm tra file âm thanh có tồn tại không"""
+        import os
+        exists = os.path.exists(self.sound_file)
+        if exists:
+            logging.info(f"✅ Sound file found: {self.sound_file}")
+        else:
+            logging.warning(f"❌ Sound file not found: {self.sound_file}")
+        return exists
+    
+    def _trigger_simple_alert(self):
+        """Kích hoạt cảnh báo đơn giản - chỉ âm thanh"""
+        current_time = time.time()
+        
+        # Kiểm tra cooldown
+        if current_time - self.last_alert_time < self.alert_cooldown:
+            return False
+        
+        # Phát âm thanh trong thread riêng để không block
+        def play_sound():
+            try:
+                if self.sound_loaded:
+                    winsound.PlaySound(self.sound_file, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                    logging.info("🔊 Alert sound played")
+                else:
+                    # Fallback: system beep
+                    winsound.Beep(1000, 500)  # 1000Hz, 500ms
+                    logging.info("🔊 System beep played")
+            except Exception as e:
+                logging.error(f"Sound play error: {e}")
+        
+        Thread(target=play_sound, daemon=True).start()
+        self.last_alert_time = current_time
+        return True
+    
+    def _add_red_border(self, frame, thickness=15):
+        """Thêm viền đỏ nháy cho frame khi có alert"""
+        # Flash effect - nháy 2 lần/giây
+        flash_state = int(time.time() * 4) % 2
+        
+        if flash_state == 0:
+            color = (0, 0, 255)  # Đỏ sáng BGR
+        else:
+            color = (0, 50, 200)  # Đỏ tối BGR
+        
+        # Vẽ viền đỏ
+        h, w = frame.shape[:2]
+        cv2.rectangle(frame, (0, 0), (w-1, h-1), color, thickness)
+        cv2.rectangle(frame, (thickness//2, thickness//2), 
+                     (w-thickness//2-1, h-thickness//2-1), color, thickness//2)
+        
+        return frame
