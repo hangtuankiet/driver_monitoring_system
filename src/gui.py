@@ -57,6 +57,14 @@ class DriverMonitoringGUI:
         self.alert_sound_enabled = True
         self.current_drowsiness_level = 0.0
 
+        # Alert state for GUI
+        self.alert_active = False
+        self.alert_flash_time = 0
+        
+        # GUI alert colors
+        self.normal_bg = '#f0f0f0'
+        self.alert_bg = '#ff4444'
+
         self.create_widgets()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.update_display()
@@ -91,12 +99,15 @@ class DriverMonitoringGUI:
         # Left panel for video and controls
         left_panel = ttk.Frame(main_container)
         left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+          # Video display with dynamic border for alerts
+        self.video_frame = ttk.LabelFrame(left_panel, text="📹 Live Feed", padding=10)
+        self.video_frame.pack(fill=tk.BOTH, expand=True, pady=5)
         
-        # Video display with modern border
-        video_frame = ttk.LabelFrame(left_panel, text="📹 Live Feed", padding=10)
-        video_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        # Create a frame inside video_frame that can change color for alerts
+        self.video_container = tk.Frame(self.video_frame, bg='#f0f0f0', relief='solid', bd=2)
+        self.video_container.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         
-        self.video_label = ttk.Label(video_frame, text="🎬 No video feed\nClick 'Start Camera' or 'Open Video' to begin", 
+        self.video_label = ttk.Label(self.video_container, text="🎬 No video feed\nClick 'Start Camera' or 'Open Video' to begin", 
                                     anchor="center", font=('Arial', 12))
         self.video_label.pack(fill=tk.BOTH, expand=True)
 
@@ -842,35 +853,42 @@ class DriverMonitoringGUI:
                         self.detection_label.config(text=f"{det_count}")
                     except:
                         pass
-                        
-                # Check for alerts and add to history
-                if hasattr(self.logic, 'current_alert'):
+                          # Check for alerts and update border
+                has_alert = False
+                if hasattr(self.logic, 'drowsiness_detector'):
                     try:
-                        alert = getattr(self.logic, 'current_alert', None)
-                        if alert and alert != getattr(self, 'last_alert', None):
-                            self.add_alert_to_history("ALERT", alert)
-                            self.last_alert = alert
+                        status = self.logic.drowsiness_detector.get_status()
+                        has_alert = len(status.get('alerts', [])) > 0
+                        self.update_alert_border(has_alert)
+                          # Add alerts to history
+                        if has_alert and status['alerts']:
+                            for alert in status['alerts']:
+                                if alert != getattr(self, 'last_alert', None):
+                                    self.add_alert_to_history("ALERT", alert)
+                                    self.last_alert = alert
                     except:
                         pass
-            
+                else:
+                    self.update_alert_border(False)
+                
                 # Update status safely
                 try:
-                    if hasattr(self.logic, 'current_alerts') and self.logic.current_alerts:
-                        alert_text = ", ".join(self.logic.current_alerts)
-                        self.status_label.config(text=f"ALERT: {alert_text}", foreground="red")
+                    if has_alert:
+                        self.status_label.config(text="🚨 DROWSINESS ALERT 🚨", foreground="red", font=('Arial', 10, 'bold'))
                     else:
-                        self.status_label.config(text="Monitoring active", foreground="green")
+                        self.status_label.config(text="✅ Monitoring Active", foreground="green", font=('Arial', 10, 'normal'))
                 except:
                     self.status_label.config(text="Monitoring active", foreground="green")
             else:
                 # Reset displays when not monitoring
+                self.update_alert_border(False)  # Reset border to normal
                 try:
                     if hasattr(self, 'fps_label'):
                         self.fps_label.config(text="--")
                     if hasattr(self, 'detection_label'):
                         self.detection_label.config(text="--")
                     if hasattr(self, 'status_label'):
-                        self.status_label.config(text="Ready", foreground="black")
+                        self.status_label.config(text="Ready", foreground="black", font=('Arial', 10, 'normal'))
                 except:
                     pass
         except Exception as e:
@@ -940,9 +958,6 @@ class DriverMonitoringGUI:
             if drowsiness_level < 25:
                 self.drowsiness_label.config(text="😊 Alert", foreground='green')
                 self.stop_red_alert()  # Stop any active alerts
-            elif drowsiness_level < 50:
-                self.drowsiness_label.config(text="😐 Mild Fatigue", foreground='orange')
-                self.stop_red_alert()
             elif drowsiness_level < 75:
                 self.drowsiness_label.config(text="😴 Drowsy", foreground='red')
                 self.start_red_alert("DROWSY")  # Start moderate alert
@@ -1239,5 +1254,18 @@ class DriverMonitoringGUI:
             self.alert_text.delete(1.0, tk.END)
         except Exception as e:
             logging.warning(f"Error clearing alert history: {e}")
+    
+    def update_alert_border(self, has_alert):
+        """Update video border color based on alert status"""
+        if has_alert:
+            # Flash red border
+            flash_state = int(time.time() * 4) % 2  # Flash 2 times per second
+            if flash_state == 0:
+                self.video_container.config(bg='#ff0000', bd=8, relief='solid')  # Bright red
+            else:
+                self.video_container.config(bg='#cc0000', bd=8, relief='solid')  # Dark red
+        else:
+            # Normal gray border
+            self.video_container.config(bg='#f0f0f0', bd=2, relief='solid')
 
 

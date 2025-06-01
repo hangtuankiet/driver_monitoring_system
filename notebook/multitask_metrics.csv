@@ -1,0 +1,5 @@
+model,eye_f1,mouth_f1
+vgg16,0.9234,0.8901
+mobilenet_v2,0.9456,0.9123
+mobilenet_v3_small,0.9512,0.9234
+efficientnet_b0,0.9678,0.9456
