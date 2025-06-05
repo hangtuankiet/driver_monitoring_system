@@ -22,6 +22,7 @@ build/
 *.egg-info/
 
 .venv/
+.vscode/
 .idea/
 
 # Generated files
@@ -57,10 +58,7 @@ temp/
 *.bak
 
 # Specific for this project model files
-# Since these files are large, they should be downloaded separately or from a model repository
-models/vgg16/best_model.pth
-models/yolov10/yolov10n/best.pt
-# But keep the directory structure
-!models/vgg16/.gitkeep
-!models/yolov10/yolov10n/.gitkeep
+
+# Large model files
+models/classification/vgg16_model.pth
 
