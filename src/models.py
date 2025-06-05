@@ -1,6 +1,7 @@
 # src/models.py
 import torch
 import torch.nn as nn
+import torch.optim as optim
 import torchvision.models as models
 from ultralytics import YOLO
 import warnings
@@ -9,63 +10,135 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="torchvision.models._utils")
 
 
-class CustomVGG16(nn.Module):
-    """A custom VGG16 model for classification tasks.
+def _create_classifier_head(num_features, num_classes):
+    """Create a classifier head with the specified number of features and classes."""
+    return nn.Sequential(
+        nn.Linear(num_features, 256),
+        nn.ReLU(),
+        nn.Dropout(p=0.5),
+        nn.Linear(256, num_classes)
+    )
 
-    This class modifies the standard VGG16 architecture by replacing the final
-    fully connected layer to support a custom number of output classes. It is
-    designed for tasks such as eye and mouth state classification in driver monitoring.
+def _create_vgg16_model(num_classes):
+    """Create a VGG16 model with custom classifier head."""
+    model = models.vgg16(pretrained=True)
+    for param in model.features[:28].parameters():
+        param.requires_grad = False
+    for param in model.features[28:].parameters():
+        param.requires_grad = True
+    num_features = model.classifier[6].in_features
+    model.classifier[6] = _create_classifier_head(num_features, num_classes)
+    return model
 
-    Attributes:
-        features (nn.Module): The convolutional feature extraction layers from VGG16.
-        avgpool (nn.Module): The adaptive average pooling layer from VGG16.
-        classifier (nn.Sequential): The modified classifier with a custom final layer.
+def _create_mobilenet_v2_model(num_classes):
+    """Create a MobileNetV2 model with custom classifier head."""
+    model = models.mobilenet_v2(pretrained=True)
+    for param in model.features.parameters():
+        param.requires_grad = False
+    for param in model.classifier.parameters():
+        param.requires_grad = True
+    num_features = model.classifier[1].in_features
+    model.classifier[1] = _create_classifier_head(num_features, num_classes)
+    return model
+
+def _create_mobilenet_v3_small_model(num_classes):
+    """Create a MobileNetV3 Small model with custom classifier head."""
+    model = models.mobilenet_v3_small(pretrained=True)
+    for param in model.features.parameters():
+        param.requires_grad = False
+    for param in model.classifier.parameters():
+        param.requires_grad = True
+    num_features = model.classifier[3].in_features
+    model.classifier[3] = _create_classifier_head(num_features, num_classes)
+    return model
+
+def _create_efficientnet_b0_model(num_classes):
+    """Create an EfficientNet B0 model with custom classifier head."""
+    model = models.efficientnet_b0(pretrained=True)
+    for param in model.features.parameters():
+        param.requires_grad = False
+    for param in model.classifier.parameters():
+        param.requires_grad = True
+    num_features = model.classifier[1].in_features
+    model.classifier[1] = _create_classifier_head(num_features, num_classes)
+    return model
+
+def get_model(backbone_name, num_classes=4, class_weights=None):
     """
+    Create a model with the specified backbone architecture.
+    
+    Args:
+        backbone_name (str): Name of the backbone ('vgg16', 'mobilenet_v2', 'mobilenet_v3_small', 'efficientnet_b0')
+        num_classes (int): Number of output classes (default: 4)
+        class_weights (torch.Tensor): Class weights for loss function (optional)
+    
+    Returns:
+        tuple: (model, criterion, optimizer, scheduler)
+    """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    model_creators = {
+        'vgg16': _create_vgg16_model,
+        'mobilenet_v2': _create_mobilenet_v2_model,
+        'mobilenet_v3_small': _create_mobilenet_v3_small_model,
+        'efficientnet_b0': _create_efficientnet_b0_model
+    }
+    
+    if backbone_name not in model_creators:
+        raise ValueError(f'Unsupported backbone: {backbone_name}')
+    
+    model = model_creators[backbone_name](num_classes)
+    model = model.to(device)
+    
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.0001, weight_decay=1e-5)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=50)
+    
+    return model, criterion, optimizer, scheduler
 
-    def __init__(self, num_classes: int = 4) -> None:
-        """Initialize the CustomVGG16 model.
 
-        Args:
-            num_classes (int, optional): Number of output classes for classification.
-                Defaults to 4 (e.g., for eye states: open/closed, and mouth states: yawn/no_yawn).
+def load_classification_model(model_path, backbone_name, num_classes=4):
+    """
+    Load a classification model from the specified path with given backbone.
+    
+    Args:
+        model_path (str): Path to the model weights file.
+        backbone_name (str): Name of the backbone architecture.
+        num_classes (int): Number of output classes.
+    
+    Returns:
+        torch.nn.Module: The loaded model instance.
+    """
+    print(f"Loading {backbone_name} model from {model_path}...")
+    try:
+        # Create model architecture
+        model, _, _, _ = get_model(backbone_name, num_classes)
+        
+        # Load state dict
+        state_dict = torch.load(model_path, map_location='cpu')
+        model.load_state_dict(state_dict)
+        
+        # Move to device and set to eval mode
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = model.to(device).eval()
+        
+        print(f"{backbone_name} model loaded successfully.")
+        return model
+    except Exception as e:
+        print(f"Error loading {backbone_name} model: {str(e)}")
+        raise
 
-        The base VGG16 model is loaded without pretrained weights, as weights will be
-        loaded from a custom state dictionary later. The final classifier layer is replaced
-        to match the specified number of classes.
-        """
-        super(CustomVGG16, self).__init__()
-        base_model = models.vgg16(pretrained=False)  # Pretrained weights are not loaded here
-        self.features = base_model.features
-        self.avgpool = base_model.avgpool
-        self.classifier = nn.Sequential(
-            *list(base_model.classifier.children())[:-1],  # Keep all classifier layers except the last
-            nn.Sequential(
-                nn.Linear(4096, 256),
-                nn.ReLU(),
-                nn.Dropout(p=0.5),
-                nn.Linear(256, num_classes)
-            )
-        )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass through the CustomVGG16 model.
-
-        Args:
-            x (torch.Tensor): Input tensor of shape (batch_size, channels, height, width).
-
-        Returns:
-            torch.Tensor: Output tensor of shape (batch_size, num_classes) containing
-                the raw scores for each class.
-
-        The input tensor is passed through the feature extraction layers, average pooling,
-        flattening, and the modified classifier to produce class scores.
-        """
-        x = self.features(x)
-        x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        x = self.classifier(x)
-        return x
-
+def get_available_yolo_models():
+    """Get list of available YOLO models.
+    
+    Returns:
+        dict: Dictionary mapping model names to file paths
+    """
+    return {
+        'yolov10': "models/detected/yolov10.pt",
+        'yolov11': "models/detected/yolov11.pt"
+    }
 
 def load_yolo_model(model_path: str) -> YOLO:
     """Load a YOLO model from the specified path.
@@ -92,36 +165,21 @@ def load_yolo_model(model_path: str) -> YOLO:
         print(f"Error loading YOLO model: {str(e)}")
         raise
 
-
-def load_vgg16_model(model_path: str, num_classes: int = 4) -> CustomVGG16:
-    """Load a CustomVGG16 model from the specified path.
-
+def load_yolo_model_by_version(version='yolov10'):
+    """Load a YOLO model by version name.
+    
     Args:
-        model_path (str): Path to the VGG16 model weights file.
-        num_classes (int, optional): Number of output classes for the model.
-            Defaults to 4 (e.g., for eye and mouth state classification).
-
+        version (str): YOLO version ('yolov10' or 'yolov11')
+        
     Returns:
-        CustomVGG16: The loaded CustomVGG16 model instance, moved to the appropriate
-            device (CPU or GPU) and set to evaluation mode.
-
-    Raises:
-        FileNotFoundError: If the model file at `model_path` does not exist.
-        Exception: If there is an error loading the VGG16 model weights.
-
-    This function initializes a CustomVGG16 model, loads its weights from the specified
-    path, moves it to the appropriate device (CUDA if available, otherwise CPU), and
-    sets it to evaluation mode for inference.
+        YOLO: The loaded YOLO model instance
     """
-    print(f"Loading VGG16 model from {model_path}...")
-    try:
-        model = CustomVGG16(num_classes)
-        state_dict = torch.load(model_path)
-        model.load_state_dict(state_dict)
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model = model.to(device).eval()
-        print("VGG16 model loaded successfully.")
-        return model
-    except Exception as e:
-        print(f"Error loading VGG16 model: {str(e)}")
-        raise
+    available_models = get_available_yolo_models()
+    if version not in available_models:
+        raise ValueError(f"Unsupported YOLO version: {version}. Available: {list(available_models.keys())}")
+    
+    model_path = available_models[version]
+    return load_yolo_model(model_path)
+
+
+

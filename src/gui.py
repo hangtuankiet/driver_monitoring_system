@@ -13,6 +13,7 @@ class DriverMonitoringGUI:
     def __init__(self, root: tk.Tk) -> None:
         """Initialize the GUI with root window and setup components."""
         self.root = root
+        # Initialize the logic without loading models initially
         self.logic = DriverMonitor()
         self.is_paused = False
         self.is_monitoring = False
@@ -125,6 +126,42 @@ class DriverMonitoringGUI:
                             font=("Arial", 14), fg="#263238", bg="#ECEFF1")
         self.lbl_yawn.pack()
 
+        # Model configuration display
+        self._create_model_info_display()
+
+    def _create_model_info_display(self) -> None:
+        """Create a panel to display current model configuration."""
+        model_info_frame = Frame(self.right_panel, bg="#ECEFF1", relief="ridge", bd=2)
+        model_info_frame.pack(pady=10, fill=tk.X, padx=5)
+        
+        # Title
+        title_label = Label(model_info_frame, text="📊 Current Configuration", 
+                           font=("Arial", 12, "bold"), fg="#263238", bg="#ECEFF1")
+        title_label.pack(pady=5)
+        
+        # YOLO model info
+        self.lbl_yolo_model = Label(model_info_frame, text="🎯 YOLO: Not loaded", 
+                                   font=("Arial", 10), fg="#37474F", bg="#ECEFF1")
+        self.lbl_yolo_model.pack(pady=2)
+        
+        # Classification model info
+        self.lbl_classification_model = Label(model_info_frame, text="🧠 Classifier: Not loaded", 
+                                             font=("Arial", 10), fg="#37474F", bg="#ECEFF1")
+        self.lbl_classification_model.pack(pady=2)
+        
+        # Source type info
+        self.lbl_source_type = Label(model_info_frame, text="📹 Source: None", 
+                                    font=("Arial", 10), fg="#37474F", bg="#ECEFF1")
+        self.lbl_source_type.pack(pady=2)
+        
+        # Models status
+        self.lbl_models_status = Label(model_info_frame, text="⚠️ Models not loaded", 
+                                      font=("Arial", 10, "bold"), fg="#F57C00", bg="#ECEFF1")
+        self.lbl_models_status.pack(pady=2)
+        
+        # Update display initially
+        self._update_model_info_display()
+
     def _create_control_buttons(self) -> None:
         """Create control buttons for the application."""
         btn_frame = Frame(self.right_panel, bg="#ECEFF1")
@@ -153,6 +190,39 @@ class DriverMonitoringGUI:
                   command=self.show_alerts, 
                   style="Blue.TButton").pack(side=tk.LEFT, padx=5)
 
+    def _update_model_info_display(self) -> None:
+        """Update the model information display with current configuration."""
+        try:
+            # Get current configuration
+            yolo_version = self.logic.get_current_yolo_version()
+            backbone = self.logic.get_current_backbone()
+            
+            # Update YOLO model display
+            self.lbl_yolo_model.config(text=f"🎯 YOLO: {yolo_version}")
+            
+            # Update classification model display
+            self.lbl_classification_model.config(text=f"🧠 Classifier: {backbone}")
+            
+            # Check if models are loaded
+            models_loaded = (hasattr(self.logic, 'yolo_model') and self.logic.yolo_model is not None and
+                           hasattr(self.logic, 'classification_model') and self.logic.classification_model is not None)
+            
+            if models_loaded:
+                self.lbl_models_status.config(text="✅ Models loaded", fg="#2E7D32")
+            else:
+                self.lbl_models_status.config(text="⚠️ Models not loaded", fg="#F57C00")
+            
+            # Update source type
+            if self.is_monitoring:
+                source_type = self.logic.get_source_type() if hasattr(self.logic, 'get_source_type') else "Unknown"
+                self.lbl_source_type.config(text=f"📹 Source: {source_type}")
+            else:
+                self.lbl_source_type.config(text="📹 Source: None")
+                
+        except Exception as e:
+            print(f"Error updating model info display: {e}")
+            self.lbl_models_status.config(text="❌ Config error", fg="#D32F2F")
+
     def toggle_monitoring(self) -> None:
         """Toggle between start, pause, and resume monitoring."""
         if not self.is_monitoring:
@@ -163,39 +233,136 @@ class DriverMonitoringGUI:
             self.pause_monitoring()
 
     def show_start_options(self) -> None:
-        """Display dialog to select monitoring input source."""
-        top = tk.Toplevel(self.root)
-        top.title("Select Input Source")
-        top.geometry("300x150")
-        top.configure(bg="#ECEFF1")
-        top.grab_set()  # Make dialog modal
-        top.resizable(False, False)
-
-        Label(top, text="Select Input Source:", 
-             font=("Arial", 12), fg="#263238", bg="#ECEFF1").pack(pady=10)
-
-        ttk.Button(top, text="Camera (Real-time)", 
-                  command=lambda: [self.start_monitoring(), top.destroy()],
-                  style="Green.TButton").pack(pady=5)
-                  
-        ttk.Button(top, text="Video File", 
-                  command=lambda: [self.start_video_selection(top), top.destroy()],
-                  style="Blue.TButton").pack(pady=5)
-
-    def start_video_selection(self, parent_window=None) -> None:
-        """Open file dialog to select a video file for monitoring."""
-        video_path = filedialog.askopenfilename(
-            title="Select Video",
-            initialdir=self.logic.config['video_path'],
-            filetypes=[("Video files", "*.mp4 *.avi *.mov")]
-        )
+        """Show dialog to choose settings and monitoring source."""
+        options_window = tk.Toplevel(self.root)
+        options_window.title("Start Monitoring - Configuration")
+        options_window.geometry("500x550")
+        options_window.configure(bg="#ECEFF1")
+        options_window.resizable(False, False)
+        options_window.transient(self.root)
+        options_window.grab_set()
         
-        if video_path:
-            success, error = self.logic.start_monitoring_video(video_path)
-            if success:
-                self._on_monitoring_started("Video")
+        # Center the window
+        options_window.geometry("+%d+%d" % (self.root.winfo_rootx() + 50, self.root.winfo_rooty() + 50))
+        
+        # Title
+        title_label = tk.Label(options_window, text="Configure Monitoring Settings", 
+                              font=("Arial", 16, "bold"), fg="#263238", bg="#ECEFF1")
+        title_label.pack(pady=20)
+        
+        # Model Settings Section
+        model_frame = tk.LabelFrame(options_window, text="Model Settings", 
+                                   font=("Arial", 12, "bold"), fg="#263238", bg="#ECEFF1")
+        model_frame.pack(pady=10, padx=20, fill="x")
+        
+        tk.Label(model_frame, text="YOLO Version:", fg="#263238", bg="#ECEFF1").pack(pady=5)
+        yolo_var = tk.StringVar(value=self.logic.get_current_yolo_version())
+        yolo_combo = ttk.Combobox(model_frame, textvariable=yolo_var, 
+                                 values=self.logic.get_available_yolo_versions(),
+                                 state="readonly", width=27)
+        yolo_combo.pack(pady=5)
+        
+        tk.Label(model_frame, text="Classification Backbone:", fg="#263238", bg="#ECEFF1").pack(pady=5)
+        backbone_var = tk.StringVar(value=self.logic.get_current_backbone())
+        backbone_combo = ttk.Combobox(model_frame, textvariable=backbone_var, 
+                                     values=self.logic.get_available_backbones(),
+                                     state="readonly", width=27)
+        backbone_combo.pack(pady=5)
+        
+        # Source Settings Section
+        source_frame = tk.LabelFrame(options_window, text="Monitoring Source", 
+                                    font=("Arial", 12, "bold"), fg="#263238", bg="#ECEFF1")
+        source_frame.pack(pady=10, padx=20, fill="x")
+        
+        source_var = tk.StringVar(value="camera")
+        tk.Radiobutton(source_frame, text="Camera", variable=source_var, value="camera",
+                      fg="#263238", bg="#ECEFF1").pack(pady=5)
+        tk.Radiobutton(source_frame, text="Video File", variable=source_var, value="video",
+                      fg="#263238", bg="#ECEFF1").pack(pady=5)
+        
+        # Camera ID setting (only for camera)
+        camera_frame = tk.Frame(source_frame, bg="#ECEFF1")
+        camera_frame.pack(pady=5, fill="x")
+        tk.Label(camera_frame, text="Camera ID:", fg="#263238", bg="#ECEFF1").pack(side="left")
+        camera_id_var = tk.StringVar(value=str(self.logic.config['capture_device']))
+        camera_entry = ttk.Entry(camera_frame, textvariable=camera_id_var, width=10)
+        camera_entry.pack(side="left", padx=5)
+        
+        # Video path setting (only for video)
+        video_frame = tk.Frame(source_frame, bg="#ECEFF1")
+        video_frame.pack(pady=5, fill="x")
+        tk.Label(video_frame, text="Video Path:", fg="#263238", bg="#ECEFF1").pack(side="left")
+        video_path_var = tk.StringVar()
+        video_entry = ttk.Entry(video_frame, textvariable=video_path_var, width=25)
+        video_entry.pack(side="left", padx=5)
+        ttk.Button(video_frame, text="Browse", 
+                  command=lambda: self._browse_video_file(video_path_var)).pack(side="left", padx=5)
+        
+        # Buttons
+        button_frame = tk.Frame(options_window, bg="#ECEFF1")
+        button_frame.pack(pady=20)
+        
+        ttk.Button(button_frame, text="Start Monitoring", 
+                  command=lambda: self._start_with_settings(options_window, yolo_var, backbone_var, 
+                                                          source_var, camera_id_var, video_path_var),
+                  style="Green.TButton").pack(side="left", padx=10)
+        
+        ttk.Button(button_frame, text="Cancel", 
+                  command=options_window.destroy,
+                  style="Gray.TButton").pack(side="left", padx=10)
+
+    def _browse_video_file(self, video_path_var):
+        """Browse for video file."""
+        file_path = filedialog.askopenfilename(
+            title="Select Video File",
+            filetypes=[("Video files", "*.mp4 *.avi *.mov *.mkv"), ("All files", "*")]
+        )
+        if file_path:
+            video_path_var.set(file_path)
+    
+    def _start_with_settings(self, window, yolo_var, backbone_var, source_var, camera_id_var, video_path_var):
+        """Start monitoring with selected settings."""
+        try:
+            # Apply model settings first
+            new_yolo = yolo_var.get()
+            current_yolo = self.logic.get_current_yolo_version()
+            if new_yolo != current_yolo:
+                success, error = self.logic.change_yolo_model(new_yolo)
+                if not success:
+                    messagebox.showerror("Error", f"Failed to change YOLO model: {error}")
+                    return
+            new_backbone = backbone_var.get()
+            current_backbone = self.logic.get_current_backbone()
+            if new_backbone != current_backbone:
+                success, error = self.logic.change_classification_model(new_backbone)
+                if not success:
+                    messagebox.showerror("Error", f"Failed to change classification model: {error}")
+                    return
+            
+            # Update model info display after changes
+            self._update_model_info_display()
+            
+            # Update camera ID if needed
+            if source_var.get() == "camera":
+                self.logic.config['capture_device'] = int(camera_id_var.get())
+            
+            # Close settings window
+            window.destroy()
+            
+            # Start monitoring based on source
+            if source_var.get() == "camera":
+                self.start_monitoring()
             else:
-                messagebox.showerror("Error", error)
+                video_path = video_path_var.get()
+                if not video_path:
+                    messagebox.showerror("Error", "Please select a video file")
+                    return
+                self.start_monitoring_video(video_path)
+                
+        except ValueError as e:
+            messagebox.showerror("Error", f"Invalid camera ID: {str(e)}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to start monitoring: {str(e)}")
 
     def start_monitoring(self) -> None:
         """Start real-time monitoring using camera."""
@@ -205,12 +372,24 @@ class DriverMonitoringGUI:
         else:
             messagebox.showerror("Error", error)
             
+    def start_monitoring_video(self, video_path):
+        """Start monitoring using a video file."""
+        success, error = self.logic.start_monitoring_video(video_path)
+        if success:
+            self._on_monitoring_started("Video")
+        else:
+            messagebox.showerror("Error", error)
+
     def _on_monitoring_started(self, source_type) -> None:
         """Update UI when monitoring starts with specified source."""
         self.is_monitoring = True
         self.btn_monitor.config(text="⏸ Pause")
         self.btn_evaluate.config(state="disabled")
         self.lbl_status.config(text=f"🚗 Status: Monitoring ({source_type})")
+        
+        # Update model info display to show models are loaded and source type
+        self._update_model_info_display()
+        
         self.update_video_thread()
             
     def pause_monitoring(self) -> None:
@@ -385,10 +564,26 @@ class DriverMonitoringGUI:
         """Display settings configuration window."""
         settings_window = tk.Toplevel(self.root)
         settings_window.title("Settings")
-        settings_window.geometry("400x550")
+        settings_window.geometry("450x650")
         settings_window.configure(bg="#ECEFF1")
         settings_window.resizable(False, False)
         settings_window.transient(self.root)  # Make window modal
+          # Model Settings
+        self._create_settings_section(settings_window, "Model Settings", 10)
+        
+        tk.Label(settings_window, text="YOLO Version:", fg="#263238", bg="#ECEFF1").pack()
+        yolo_var = tk.StringVar(value=self.logic.get_current_yolo_version())
+        yolo_combo = ttk.Combobox(settings_window, textvariable=yolo_var, 
+                                 values=self.logic.get_available_yolo_versions(),
+                                 state="readonly", width=27)
+        yolo_combo.pack(pady=5)
+        
+        tk.Label(settings_window, text="Classification Backbone:", fg="#263238", bg="#ECEFF1").pack()
+        backbone_var = tk.StringVar(value=self.logic.get_current_backbone())
+        backbone_combo = ttk.Combobox(settings_window, textvariable=backbone_var, 
+                                     values=self.logic.get_available_backbones(),
+                                     state="readonly", width=27)
+        backbone_combo.pack(pady=5)
         
         # Camera/Video Settings
         self._create_settings_section(settings_window, "Camera/Video Settings", 10)
@@ -432,34 +627,46 @@ class DriverMonitoringGUI:
         volume_scale = ttk.Scale(settings_window, from_=0, to=1, orient="horizontal", 
                                value=self.logic.config['sound_volume'])
         volume_scale.pack(pady=5)
-
+        
         # Misc Settings
         self._create_settings_section(settings_window, "Other Settings", 20)
         
         save_alerts_var = tk.BooleanVar(value=self.logic.config['save_alerts'])
         tk.Checkbutton(settings_window, text="Save Alert History", 
-                      variable=save_alerts_var, fg="#263238", bg="#ECEFF1").pack(pady=10)
-
-        # Save button
+                      variable=save_alerts_var, fg="#263238", bg="#ECEFF1").pack(pady=10)        # Save button
         ttk.Button(settings_window, text="Save Settings", 
                   command=lambda: self._save_settings(
-                      settings_window, camera_id, video_path, eye_threshold,
+                      settings_window, yolo_var, backbone_var, camera_id, video_path, eye_threshold,
                       yawn_threshold, yawn_size_threshold, sound_enabled_var,
                       volume_scale, save_alerts_var
                   ), 
-                  style="Green.TButton").pack(pady=20)
+                  style="Green.TButton").pack(pady=20)    
 
     def _create_settings_section(self, parent, title, pady=10):
         """Create a titled section in settings dialog."""
         tk.Label(parent, text=title, font=("Arial", 12, "bold"), 
-               fg="#263238", bg="#ECEFF1").pack(pady=pady)
-
-    def _save_settings(self, window, camera_id, video_path, eye_threshold,
+               fg="#263238", bg="#ECEFF1").pack(pady=pady)    
+    def _save_settings(self, window, yolo_var, backbone_var, camera_id, video_path, eye_threshold,
                      yawn_threshold, yawn_size_threshold, sound_enabled_var,
                      volume_scale, save_alerts_var):
         """Save all settings from the settings window."""
         try:
-            # Update config with new values
+            # Models don't need to be loaded here - we'll just update the config
+            # When user starts monitoring, models will be loaded with the selected options
+            
+            # Update YOLO model config if changed
+            new_yolo = yolo_var.get()
+            current_yolo = self.logic.get_current_yolo_version()
+            if new_yolo != current_yolo:
+                self.logic.change_yolo_model(new_yolo)
+            
+            # Update classification model config if changed
+            new_backbone = backbone_var.get()
+            current_backbone = self.logic.get_current_backbone()
+            if new_backbone != current_backbone:
+                self.logic.change_classification_model(new_backbone)
+            
+            # Update other settings
             self.logic.config['capture_device'] = int(camera_id.get())
             self.logic.config['video_path'] = video_path.get()
             self.logic.config['eye_closure_threshold'] = float(eye_threshold.get())

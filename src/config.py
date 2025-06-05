@@ -10,8 +10,13 @@ class ConfigManager:
     
     DEFAULT_CONFIG = {
         # Model paths
-        'yolo_model_path': "models/yolov10/yolov10n/best.pt",
-        'vgg_model_path': "models/vgg16/best_model.pth",
+        'yolo_model_path': "models/detected/yolov10.pt",
+        'classification_model_path': "models/classification/vgg16_model.pth",
+        
+        # Model selection
+        'yolo_version': 'yolov10',            # Available: yolov10, yolov11
+        'classification_backbone': 'vgg16',    # Available: vgg16, mobilenet_v2, mobilenet_v3_small, efficientnet_b0
+        'num_classes': 4,                     # Number of classification classes
         
         # Detection thresholds
         'confidence_threshold': 0.6,          # YOLO detection confidence
@@ -78,3 +83,73 @@ class ConfigManager:
         os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
         with open(self.config_path, 'w') as f:
             json.dump(self.config, f, indent=4)
+
+    def get_available_backbones(self):
+        """Get list of available classification backbones.
+        
+        Returns:
+            list: List of available backbone names
+        """
+        return ['vgg16', 'mobilenet_v2', 'mobilenet_v3_small', 'efficientnet_b0']
+    
+    def get_model_path_for_backbone(self, backbone_name):
+        """Get the model path for a specific backbone.
+        
+        Args:
+            backbone_name (str): Name of the backbone
+            
+        Returns:
+            str: Path to the model file
+        """
+        model_paths = {
+            'vgg16': "models/classification/vgg16_model.pth",
+            'mobilenet_v2': "models/classification/mobilenet_v2_model.pth", 
+            'mobilenet_v3_small': "models/classification/mobilenet_v3_small_model.pth",
+            'efficientnet_b0': "models/classification/efficientnet_b0_model.pth"
+        }
+        return model_paths.get(backbone_name, self.config['classification_model_path'])
+
+    def update_classification_model(self, backbone_name):
+        """Update the classification model configuration.
+        
+        Args:
+            backbone_name (str): Name of the new backbone to use
+        """
+        if backbone_name in self.get_available_backbones():
+            self.config['classification_backbone'] = backbone_name
+            self.config['classification_model_path'] = self.get_model_path_for_backbone(backbone_name)
+            self.save_config()
+    
+    def get_available_yolo_versions(self):
+        """Get list of available YOLO versions.
+        
+        Returns:
+            list: List of available YOLO version names
+        """
+        return ['yolov10', 'yolov11']
+    
+    def get_yolo_model_path_for_version(self, version):
+        """Get the model path for a specific YOLO version.
+        
+        Args:
+            version (str): Name of the YOLO version
+            
+        Returns:
+            str: Path to the YOLO model file
+        """
+        model_paths = {
+            'yolov10': "models/detected/yolov10.pt",
+            'yolov11': "models/detected/yolov11.pt"
+        }
+        return model_paths.get(version, self.config['yolo_model_path'])
+
+    def update_yolo_model(self, version):
+        """Update the YOLO model configuration.
+        
+        Args:
+            version (str): Name of the new YOLO version to use
+        """
+        if version in self.get_available_yolo_versions():
+            self.config['yolo_version'] = version
+            self.config['yolo_model_path'] = self.get_yolo_model_path_for_version(version)
+            self.save_config()

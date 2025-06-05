@@ -1,0 +1,14 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run Driver Monitoring System",
+      "type": "shell",
+      "command": "python",
+      "args": ["main.py"],
+      "group": "build",
+      "isBackground": false,
+      "problemMatcher": ["$python"]
+    }
+  ]
+}

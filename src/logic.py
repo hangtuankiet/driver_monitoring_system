@@ -8,7 +8,7 @@ import logging
 import json
 from datetime import datetime
 import os
-from .models import load_yolo_model, load_vgg16_model
+from .models import load_yolo_model, load_classification_model
 from .config import ConfigManager
 from .utils import setup_logging, preprocess_image, play_alarm, create_storage_directories
 from .evaluator import SystemPerformanceEvaluator
@@ -23,7 +23,7 @@ class DriverMonitor:
     """
     Core component that manages driver drowsiness monitoring using computer vision.
     Handles detection and classification of eyes and mouth states to identify fatigue signs.
-    """
+    """    
     def __init__(self):
         """
         Initialize the DriverMonitor with configurations, models, and state variables.
@@ -37,9 +37,12 @@ class DriverMonitor:
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         logging.info(f"Using device: {self.device}")
 
-        # Initialize models and state variables
-        self._initialize_models()
+        # Initialize state variables
         self._initialize_state_variables()
+        
+        # Models will be loaded when needed (lazy loading)
+        self.yolo_model = None
+        self.classification_model = None
         
         # Initialize object tracking for better persistence
         self.last_eye_boxes = []
@@ -47,8 +50,7 @@ class DriverMonitor:
         self.detection_persistence = 5
         self.eye_track_count = 0
         self.mouth_track_count = 0
-        
-        # Video synchronization variables
+          # Video synchronization variables
         self.video_start_time = None
         self.video_fps = 0
         self.frame_position = 0
@@ -56,11 +58,36 @@ class DriverMonitor:
 
     def _initialize_models(self):
         """
-        Load YOLO and VGG16 models for detection and classification.
+        Load YOLO and classification models for detection and classification.
+        This is now a lazy-loading function that will be called when models are needed.
+        Only loads models if they haven't been loaded yet or if config has changed.
         """
         try:
-            self.yolo_model = load_yolo_model(self.config['yolo_model_path'])
-            self.vgg_model = load_vgg16_model(self.config['vgg_model_path'])
+            # Check if YOLO model needs loading/reloading
+            current_yolo_path = self.config['yolo_model_path']
+            if self.yolo_model is None or not hasattr(self, '_loaded_yolo_path') or self._loaded_yolo_path != current_yolo_path:
+                logging.info(f"Loading YOLO model: {current_yolo_path}")
+                self.yolo_model = load_yolo_model(current_yolo_path)
+                self._loaded_yolo_path = current_yolo_path
+                
+            # Check if classification model needs loading/reloading
+            current_classification_path = self.config['classification_model_path']
+            current_backbone = self.config['classification_backbone']
+            if (self.classification_model is None or 
+                not hasattr(self, '_loaded_classification_path') or 
+                self._loaded_classification_path != current_classification_path or
+                not hasattr(self, '_loaded_backbone') or
+                self._loaded_backbone != current_backbone):
+                
+                logging.info(f"Loading classification model: {current_classification_path} with backbone: {current_backbone}")
+                self.classification_model = load_classification_model(
+                    current_classification_path, 
+                    current_backbone, 
+                    self.config['num_classes']
+                )
+                self._loaded_classification_path = current_classification_path
+                self._loaded_backbone = current_backbone
+                
             logging.info("Models initialized successfully")
         except Exception as e:
             logging.error(f"Error initializing models: {str(e)}")
@@ -96,20 +123,22 @@ class DriverMonitor:
 
         # Detection timeout for resetting states
         self.last_detection_time = None
-        self.detection_timeout = 1.0
-
-        # Alert sound management
+        self.detection_timeout = 1.0        # Alert sound management
         self.last_alert_time = 0
         self.alert_cooldown = 5.0
 
     def start_monitoring(self):
         """
         Start monitoring using the camera.
+        Models will be loaded here if they haven't been loaded yet.
 
         Returns:
             tuple: (success: bool, error_message: str or None)
         """
         try:
+            # Make sure models are loaded before starting
+            self._initialize_models()
+            
             logging.info(f"Attempting to open camera with device index: {self.config['capture_device']}")
             self.cap = cv2.VideoCapture(self.config['capture_device'])
             if not self.cap.isOpened():
@@ -126,6 +155,7 @@ class DriverMonitor:
     def start_monitoring_video(self, video_path):
         """
         Start monitoring using a video file.
+        Models will be loaded here if they haven't been loaded yet.
 
         Args:
             video_path (str): Path to the video file.
@@ -134,6 +164,9 @@ class DriverMonitor:
             tuple: (success: bool, error_message: str or None)
         """
         try:
+            # Make sure models are loaded before starting
+            self._initialize_models()
+            
             self.cap = cv2.VideoCapture(video_path)
             if not self.cap.isOpened():
                 raise Exception("Cannot open video file")
@@ -320,9 +353,7 @@ class DriverMonitor:
         elif self.last_mouth_boxes and self.mouth_track_count < self.detection_persistence:
             logging.info(f"No mouth detection, using tracking from previous frame ({self.mouth_track_count}/{self.detection_persistence})")
             mouths = self.last_mouth_boxes
-            self.mouth_track_count += 1
-
-        # Process eyes
+            self.mouth_track_count += 1        # Process eyes
         for x1, y1, x2, y2, conf in eyes:
             obj = annotated_frame[int(y1):int(y2), int(x1):int(x2)]
             if obj.size == 0:
@@ -331,7 +362,7 @@ class DriverMonitor:
             if obj_tensor is None:
                 continue
             with torch.no_grad():
-                pred = torch.softmax(self.vgg_model(obj_tensor)[0], dim=0)
+                pred = torch.softmax(self.classification_model(obj_tensor)[0], dim=0)
             eyes_detected = self.process_eyes(pred, x1, y1, x2, y2, annotated_frame)
 
         # Process mouth
@@ -343,7 +374,7 @@ class DriverMonitor:
             if obj_tensor is None:
                 continue
             with torch.no_grad():
-                pred = torch.softmax(self.vgg_model(obj_tensor)[0], dim=0)
+                pred = torch.softmax(self.classification_model(obj_tensor)[0], dim=0)
             mouth_detected = self.process_mouth(pred, x1, y1, x2, y2, annotated_frame)
 
         # Reset states if no face is detected for too long
@@ -692,7 +723,7 @@ class DriverMonitor:
 
         Returns:
             tuple: (stats: dict, final_stats: dict or None)
-        """
+        """        
         self.is_evaluating = False
         stats = None
         final_stats = None
@@ -704,6 +735,84 @@ class DriverMonitor:
 
         self.stop_monitoring()
         return stats, final_stats
+
+    def change_classification_model(self, backbone_name):
+        """
+        Change the classification model to use a different backbone.
+        This only updates the config. Models will be loaded when monitoring starts.
+        
+        Args:
+            backbone_name (str): Name of the new backbone to use
+            
+        Returns:
+            tuple: (success: bool, error_message: str or None)
+        """
+        try:
+            # Update config only - don't load models yet
+            self.config_manager.update_classification_model(backbone_name)
+            self.config = self.config_manager.config
+            
+            # Reset loaded model path tracker so it will reload next time
+            if hasattr(self, '_loaded_classification_path'):
+                delattr(self, '_loaded_classification_path')
+            if hasattr(self, '_loaded_backbone'):
+                delattr(self, '_loaded_backbone')
+            
+            # Don't load model here - wait until monitoring starts
+            logging.info(f"Updated classification model config to: {backbone_name} (will be loaded when monitoring starts)")
+            
+            logging.info(f"Successfully changed classification model to {backbone_name}")
+            return True, None
+        except Exception as e:
+            error_msg = f"Error changing classification model: {str(e)}"
+            logging.error(error_msg)
+            return False, error_msg
+
+    def change_yolo_model(self, version):
+        """
+        Change the YOLO model to use a different version.
+        This only updates the config. Models will be loaded when monitoring starts.
+        
+        Args:
+            version (str): Name of the new YOLO version to use
+            
+        Returns:
+            tuple: (success: bool, error_message: str or None)
+        """
+        try:
+            # Update config only - don't load models yet
+            self.config_manager.update_yolo_model(version)
+            self.config = self.config_manager.config
+            
+            # Reset loaded model path tracker so it will reload next time
+            if hasattr(self, '_loaded_yolo_path'):
+                delattr(self, '_loaded_yolo_path')
+            
+            # Don't load model here - wait until monitoring starts
+            logging.info(f"Updated YOLO model config to: {version} (will be loaded when monitoring starts)")
+            
+            logging.info(f"Successfully changed YOLO model to {version}")
+            return True, None
+        except Exception as e:
+            error_msg = f"Error changing YOLO model: {str(e)}"
+            logging.error(error_msg)
+            return False, error_msg
+    
+    def get_current_backbone(self):
+        """Get the currently selected backbone name."""
+        return self.config.get('classification_backbone', 'vgg16')
+    
+    def get_available_backbones(self):
+        """Get list of available backbone names."""
+        return self.config_manager.get_available_backbones()
+    
+    def get_current_yolo_version(self):
+        """Get the currently selected YOLO version name."""
+        return self.config.get('yolo_version', 'yolov10')
+    
+    def get_available_yolo_versions(self):
+        """Get list of available YOLO version names."""
+        return self.config_manager.get_available_yolo_versions()
 
     def get_fps(self):
         """
